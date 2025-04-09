@@ -157,6 +157,16 @@ def get_recent_jobs():
     finally:
         session.close()
 
+# Function to get job list for dropdown
+def get_job_list():
+    """Get a list of job IDs for the dropdown"""
+    session = SessionLocal()
+    try:
+        jobs = session.query(Job).order_by(desc(Job.created_at)).limit(10).all()
+        return [str(job.id) for job in jobs]
+    finally:
+        session.close()
+
 # Function to get detailed job information
 def get_job_details(job_id):
     """Get detailed information about a specific job"""
@@ -516,9 +526,10 @@ with gr.Blocks(title="Melody Generator") as demo:
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown("### Recent Jobs")
+                    # Initialize with empty list, then update with refresh button
                     job_list_dropdown = gr.Dropdown(
                         label="Select a job to view details",
-                        choices=lambda: [str(job.id) for job in SessionLocal().query(Job).order_by(desc(Job.created_at)).limit(10).all()],
+                        choices=[],  # Start with empty list
                         interactive=True
                     )
                     refresh_jobs_btn = gr.Button("Refresh Job List")
@@ -528,7 +539,7 @@ with gr.Blocks(title="Melody Generator") as demo:
             
             # Set up the refresh and selection functionality
             refresh_jobs_btn.click(
-                fn=lambda: gr.update(choices=[str(job.id) for job in SessionLocal().query(Job).order_by(desc(Job.created_at)).limit(10).all()]),
+                fn=get_job_list,  # Use the function to get job list
                 outputs=job_list_dropdown
             )
             job_list_dropdown.change(
@@ -578,6 +589,9 @@ with gr.Blocks(title="Melody Generator") as demo:
             recent_jobs_display
         ]
     )
+
+    # Initialize the job list dropdown when the app starts
+    demo.load(fn=get_job_list, outputs=job_list_dropdown)
 
 if __name__ == "__main__":
     # Launch without share=True to avoid the bug with JSON schema conversion.

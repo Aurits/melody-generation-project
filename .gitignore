@@ -1,6 +1,6 @@
 # models
-tmik_bgm_conditional_melody_generation/*
-tmik_make_vocal_mix/*
+tmik_bgm_conditional_melody_generation
+tmik_make_vocal_mix
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
