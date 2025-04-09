@@ -1,6 +1,6 @@
 # models
-tmik_bgm_conditional_melody_generation
-tmik_make_vocal_mix
+tmik_bgm_conditional_melody_generation/*
+tmik_make_vocal_mix/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -81,8 +81,6 @@ venv.bak/
 .spyproject
 # Rope project settings
 .ropeproject
-# mkdocs documentation
-docs/
 # mypy
 .mypy_cache/
 .dmypy.json
