@@ -81,13 +81,15 @@ def run_command_in_container(container_name, command_list):
         logger.error(f"Unexpected error running command: {str(e)}", exc_info=True)
         raise
 
-def generate_melody(input_bgm, checkpoint, gen_seed, output_dir):
+def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, bpm=0):
     """
     Triggers the melody generation model.
     - input_bgm: Path to the original background music file (in the shared volume)
     - checkpoint: Path to the GETMusic checkpoint (inside the melody container)
     - gen_seed: The seed for generation
     - output_dir: The output directory for melody files
+    - start_time: Song start time in seconds
+    - bpm: Beats per minute
     Returns the path to the generated melody MIDI file.
     """
     container_name = "melody-generation"
@@ -104,7 +106,9 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir):
         raise FileNotFoundError(f"Input file {input_bgm} does not exist")
     
     logger.info(f"Generating melody for {input_bgm} with seed {gen_seed} to {output_dir}")
+    logger.info(f"Using start_time={start_time}, bpm={bpm}")
     
+    # Build the command
     command = [
         "uv", "run", "melody_generation.py",
         "--load_path", checkpoint,
@@ -112,6 +116,17 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir):
         "--gen_seed", str(gen_seed),
         "--output_dir", output_dir
     ]
+    
+    # Only add start_time and bpm if at least one is non-zero
+    if start_time > 0 or bpm > 0:
+        # According to the README, if start_time is specified, bpm must also be specified
+        if start_time > 0:
+            command.extend(["--start_time", str(start_time)])
+            command.extend(["--bpm", str(bpm)])
+        elif bpm > 0:
+            # If only BPM is specified (start_time=0), still pass both parameters
+            command.extend(["--start_time", "0"])
+            command.extend(["--bpm", str(bpm)])
     
     run_command_in_container(container_name, command)
     
@@ -127,7 +142,7 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir):
         time.sleep(3)
     
     raise FileNotFoundError(f"Melody file {melody_file} was not created after waiting")
-
+    
 def mix_vocals(original_bgm, melody_file, output_dir):
     """
     Triggers the vocal mix model.
@@ -178,8 +193,7 @@ def mix_vocals(original_bgm, melody_file, output_dir):
     
     raise FileNotFoundError(f"Mix file {mix_file} was not created after waiting")
     
-
-def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None):
+def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0):
     """
     Orchestrates the complete workflow:
       1. Runs melody generation.
@@ -192,9 +206,12 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None):
         checkpoint: Path to model checkpoint
         gen_seed: Generation seed
         job_id: Optional job ID for organizing outputs
+        start_time: Song start time in seconds
+        bpm: Beats per minute
     """
     try:
         logger.info(f"Processing song: {input_bgm} for job {job_id}")
+        logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}")
         
         # Create job-specific output directories if job_id is provided
         if job_id:
@@ -209,7 +226,7 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None):
         os.makedirs(vocal_output_dir, exist_ok=True)
         
         # Generate melody
-        melody_file = generate_melody(input_bgm, checkpoint, gen_seed, melody_output_dir)
+        melody_file = generate_melody(input_bgm, checkpoint, gen_seed, melody_output_dir, start_time, bpm)
         logger.info(f"Melody file generated successfully at: {melody_file}")
         
         # Mix vocals

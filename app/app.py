@@ -207,7 +207,7 @@ def get_recent_jobs():
                 <tr>
                     <th>Job ID</th>
                     <th>Status</th>
-                    <th>Duration</th>
+                    <th>Processing Time</th>
                     <th>Parameters</th>
                     <th>Input File</th>
                 </tr>
@@ -307,16 +307,10 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
         return "⚠️ Please upload a backing track first", None, None, None, get_recent_jobs(), get_current_job_status()
     
     # Validate inputs
-    if start_time and start_time > 0:
-        if not bpm or bpm <= 0:
-            error = "If start_time is provided, BPM must also be greater than 0."
-            logger.warning(error)
-            return error, None, None, None, get_recent_jobs(), get_current_job_status()
-    elif bpm and bpm > 0:
-        if not start_time or start_time <= 0:
-            error = "If BPM is provided, start_time must also be greater than 0."
-            logger.warning(error)
-            return error, None, None, None, get_recent_jobs(), get_current_job_status()
+    if start_time > 0 and (not bpm or bpm <= 0):
+        error = "If start_time is greater than 0, BPM must also be greater than 0."
+        logger.warning(error)
+        return error, None, None, None, get_recent_jobs(), get_current_job_status()
     
     try:
         progress(0, "Initializing...")
