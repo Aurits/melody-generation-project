@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:10.8-alpine
+    container_name: postgres-database
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mydb
+    ports:
+      - "4200:5432"
+    volumes:
+      - ./shared_data:/shared_data
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      retries: 5
+
+  melody_generation:
+    build:
+      context: ./tmik_bgm_conditional_melody_generation
+      dockerfile: Dockerfile
+    container_name: melody-generation
+    environment:
+      - CHECKPOINT_PATH=/app/checkpoints/checkpoint.pth
+      - BGMPATH=/app/testdata/test.mid
+      - GEN_SEED=0
+    volumes:
+      - ./shared_data:/shared_data
+      - ./tmik_bgm_conditional_melody_generation:/app
+    command: ["tail", "-f", "/dev/null"]  # Keeps container running
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  vocal_mix:
+    build:
+      context: ./tmik_make_vocal_mix
+      dockerfile: Dockerfile
+    container_name: vocal-mix
+    environment:
+      - DREAMTONICS_SDK_PATH=/app/dreamtonics_sdk
+      - SEX=female
+    volumes:
+      - ./shared_data:/shared_data
+      - ./tmik_make_vocal_mix:/app
+    command: ["tail", "-f", "/dev/null"]  # Keeps container running
+    depends_on:
+      - postgres
+      - melody_generation
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  integrated_app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: integrated-app
+    ports:
+      - "80:7860"  # Map host port 80 to container port 7860
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres-database:5432/mydb
+    volumes:
+      - ./shared_data:/shared_data
+      - ./app:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
+    depends_on:
+      - postgres
+      - melody_generation
+      - vocal_mix
+
+volumes:
+  db-data:

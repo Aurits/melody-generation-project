@@ -1,0 +1,4 @@
+gradio==5.22.0
+sqlalchemy
+psycopg2-binary
+alembic
