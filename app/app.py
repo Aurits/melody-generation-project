@@ -394,6 +394,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
         progress(0.3, f"Job submitted (ID: {job_id}). Waiting for processing...")
         output_file, status = poll_job_status(job_id, progress)
 
+
         # Process the results
         if status == "completed":
             # Generate a unique ID for this generation
@@ -421,71 +422,97 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             output_dir = os.path.dirname(output_file)
             vocal_melody_path = os.path.join(output_dir, "vocal.wav")
             mixed_track_path = output_file  # This is the mix.wav file
-            midi_file_path = os.path.join(SHARED_DIR, "melody_results", "melody.mid")
             
-            # Copy files to job-specific directories
+            # Check multiple possible locations for the MIDI file
+            possible_midi_paths = [
+                os.path.join(SHARED_DIR, "melody_results", "melody.mid"),
+                os.path.join(job_melody_dir, "melody.mid"),
+                os.path.join(SHARED_DIR, "melody_results", f"job_{job_id}", "melody.mid"),
+                os.path.join(output_dir, "melody.mid")
+            ]
+            
+            midi_file_path = None
+            for path in possible_midi_paths:
+                if os.path.exists(path):
+                    midi_file_path = path
+                    logger.info(f"Found MIDI file at: {midi_file_path}")
+                    break
+            
+            # Copy files to job-specific directories if they exist
+            files_copied = []
+            
             if os.path.exists(vocal_melody_path):
                 shutil.copy2(vocal_melody_path, vocal_path)
                 logger.info(f"Copied vocal file to {vocal_path}")
+                files_copied.append("vocal")
+            else:
+                logger.warning(f"Vocal file not found at {vocal_melody_path}")
             
             if os.path.exists(mixed_track_path):
                 shutil.copy2(mixed_track_path, mixed_path)
                 logger.info(f"Copied mixed file to {mixed_path}")
-                
-            if os.path.exists(midi_file_path):
+                files_copied.append("mixed")
+            else:
+                logger.warning(f"Mixed file not found at {mixed_track_path}")
+            
+            if midi_file_path and os.path.exists(midi_file_path):
                 shutil.copy2(midi_file_path, midi_path)
-                logger.info(f"Copied MIDI file to {midi_path}")            
-            # Verify output files exist
-            files_exist = (
-                os.path.exists(vocal_path) and 
-                os.path.exists(mixed_path) and 
-                os.path.exists(midi_path)
-            )
+                logger.info(f"Copied MIDI file to {midi_path}")
+                files_copied.append("midi")
+            else:
+                logger.warning("MIDI file not found in any of the expected locations")
             
             # Make sure the audio files are readable by the current user
             try:
-                if os.path.exists(vocal_path):
-                    os.chmod(vocal_path, 0o644)
-                if os.path.exists(mixed_path):
-                    os.chmod(mixed_path, 0o644)
-                if os.path.exists(midi_path):
-                    os.chmod(midi_path, 0o644)
+                for path in [vocal_path, mixed_path, midi_path]:
+                    if os.path.exists(path):
+                        os.chmod(path, 0o644)
             except Exception as e:
                 logger.warning(f"Could not set file permissions: {str(e)}")
             
             # Update the job record with the new output file path
             session = SessionLocal()
             job = session.query(Job).filter(Job.id == job_id).first()
-            job.output_file = mixed_path
+            job.output_file = mixed_path if os.path.exists(mixed_path) else output_file
             session.commit()
             session.close()
             
             progress(1.0, "Generation complete!")
             
-            if files_exist:
+            # Consider the job successful if at least the mixed track is available
+            if "mixed" in files_copied:
                 success_message = f"✅ Generation complete! (Job ID: {job_id})"
                 
                 # Log the paths being returned to the UI
-                logger.info(f"Returning vocal path: {vocal_path}")
-                logger.info(f"Returning mixed path: {mixed_path}")
-                logger.info(f"Returning MIDI path: {midi_path}")
+                if "vocal" in files_copied:
+                    logger.info(f"Returning vocal path: {vocal_path}")
+                if "mixed" in files_copied:
+                    logger.info(f"Returning mixed path: {mixed_path}")
+                if "midi" in files_copied:
+                    logger.info(f"Returning MIDI path: {midi_path}")
                 
                 # Update recent jobs display and current job status
                 recent_jobs_html = get_recent_jobs()
                 current_job_status = get_current_job_status()
                 
-                # Return all outputs
-                return success_message, vocal_path, mixed_path, midi_path, recent_jobs_html, current_job_status
+                # Return all outputs, using None for any missing files
+                return (
+                    success_message, 
+                    vocal_path if "vocal" in files_copied else None, 
+                    mixed_path if "mixed" in files_copied else None, 
+                    midi_path if "midi" in files_copied else None, 
+                    recent_jobs_html, 
+                    current_job_status
+                )
             else:
-                error_message = f"⚠️ Job completed but some files are missing (Job ID: {job_id})"
+                error_message = f"⚠️ Job completed but essential files are missing (Job ID: {job_id})"
                 return error_message, None, None, None, get_recent_jobs(), get_current_job_status()
-        else:
-            error_message = f"❌ Job failed or timed out (Job ID: {job_id})"
-            return error_message, None, None, None, get_recent_jobs(), get_current_job_status()
 
     except Exception as e:
         logger.error(f"Error generating melodies: {str(e)}", exc_info=True)
         return f"❌ Error: {str(e)}", None, None, None, get_recent_jobs(), get_current_job_status()
+
+
 
 def randomize_seed_value():
     import random
