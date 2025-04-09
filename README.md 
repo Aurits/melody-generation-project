@@ -1,119 +1,152 @@
 # AI Music Generation System
 
-A modular, containerized system for generating melodies and mixing vocal tracks using GETMusic and Dreamtonics. This project orchestrates multiple services (melody generation, vocal mix, and an integrated web UI) with asynchronous job processing and database tracking.
+A production-ready AI platform that transforms background tracks into complete musical compositions with vocal elements. The system leverages GETMusic and Dreamtonics technologies through a modular, containerized architecture with reliable job management.
 
----
+![Music Generation Flow](https://via.placeholder.com/800x200?text=AI+Music+Generation+Workflow)
 
-## Overview
+## ✨ Features
 
-This system comprises several components:
+- **Automated Melody Generation**: Transform background tracks into MIDI melodies using AI
+- **Vocal Synthesis Integration**: Mix generated melodies with background tracks for complete compositions
+- **User-friendly Interface**: Intuitive Gradio-based web UI for all operations
+- **Robust Job Management**: Asynchronous processing with real-time status tracking
+- **Containerized Architecture**: Fully portable with Docker for consistent deployment across environments
 
-- **Melody Generation Service**: Generates a melody (MIDI file) from a given background music file.
-- **Vocal Mixing Service**: Combines the generated melody with the original background track to produce a vocal mix.
-- **Integrated Application**: A Gradio-based web interface for submitting jobs, checking job status, and previewing outputs.
-- **Database**: PostgreSQL is used to track job submissions and statuses.
-- **Job Manager**: A background worker that processes jobs asynchronously by invoking model commands via Docker exec.
+## 🏗️ System Architecture
 
----
+The system employs a microservices architecture with the following components:
 
-## Architecture and File Structure
+| Component | Purpose | Technology |
+|-----------|---------|------------|
+| Melody Generation Service | Creates MIDI files from background tracks | GETMusic AI Model |
+| Vocal Mixing Service | Combines melodies with original tracks | Dreamtonics Engine |
+| Web Application | User interface and job submission | Gradio + Flask |
+| Database | Job tracking and result storage | PostgreSQL |
+| Job Manager | Asynchronous task orchestration | Custom Python Worker |
+
+### Directory Structure
 
 ```
 project-root/
-├── docker-compose.yml          # Orchestrates all services (Postgres, melody generation, vocal mix, integrated app)
-├── .env                        # Environment variables (e.g., DATABASE_URL)
-├── shared_data/                # Shared volume for file exchange (input, melody_results, vocal_results)
+├── docker-compose.yml          # Service orchestration
+├── .env                        # Environment configuration
+├── shared_data/                # Volume for file exchange
+│   ├── input/                  # Uploaded background tracks
+│   ├── melody_results/         # Generated MIDI files
+│   └── vocal_results/          # Final mixed compositions
 ├── app/                        # Integrated Application
-│   ├── app.py                  # Main Gradio UI, job submission, and status checking
-│   ├── services.py             # Service functions (calls model CLI via docker exec)
-│   ├── models.py               # SQLAlchemy models & DB session configuration
-│   ├── job_manager.py          # Background job processing logic
-│   ├── alembic.ini             # Alembic configuration for DB migrations
-│   ├── alembic/                # Alembic migration scripts
-│   └── requirements.txt        # Python dependencies (Gradio, SQLAlchemy, Alembic, etc.)
-├── tmik_bgm_conditional_melody_generation/  # Melody Generation Service (provided by team)
-│   ├── Dockerfile
-│   ├── melody_generation.py
-│   └── ... (other files and directories)
-└── tmik_make_vocal_mix/        # Vocal Mixing Service (provided by team)
-    ├── Dockerfile
-    ├── make_vocalmix.py
-    └── ... (other files and directories)
+│   ├── app.py                  # Gradio UI and API endpoints
+│   ├── services.py             # Service communication layer
+│   ├── models.py               # Database models
+│   ├── job_manager.py          # Background worker
+│   ├── alembic.ini             # Database migration config
+│   └── alembic/                # Migration scripts
+├── tmik_bgm_conditional_melody_generation/  # Melody Generation Service
+└── tmik_make_vocal_mix/        # Vocal Mixing Service
 ```
 
----
+## 🚀 Getting Started
 
-## Prerequisites
+### Prerequisites
 
-- **Docker & Docker Compose** installed on your system.
-- Ensure your environment variables (e.g., in `.env`) are set correctly:
-  - `DATABASE_URL=postgresql://myuser:mypassword@postgres-database:5432/mydb`
+- **Docker Engine** v20.10+ and **Docker Compose** v2.0+
+- At least 8GB RAM and 20GB disk space
+- NVIDIA GPU (optional, significantly improves performance)
 
----
+### Quick Start
 
-## Setup and Installation
-
-1. **Clone the Repository:**
+1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/melody-generation-project.git
-   cd melody-generation-project
+   git clone https://github.com/yourusername/ai-music-generation.git
+   cd ai-music-generation
    ```
 
-2. **Prepare the Environment:**
-   - Create a `.env` file with the required environment variables.
-   - Place GETMusic's checkpoint in `tmik_bgm_conditional_melody_generation/checkpoints/`.
-
-3. **Build and Start the Containers:**
+2. **Configure your environment:**
    ```bash
-   docker-compose up --build
+   cp .env.example .env
+   # Edit .env with your preferred settings
    ```
-   This command will build all images, start the services, run Alembic migrations, and launch the integrated app.
+
+3. **Place model checkpoints:**
+   Download the GETMusic checkpoint file and place it in:
+   ```
+   tmik_bgm_conditional_melody_generation/checkpoints/
+   ```
+
+4. **Launch the system:**
+   ```bash
+   docker-compose up -d
+   ```
+
+5. **Access the web interface:**
+   Open your browser to http://localhost:8080
+
+## 💻 Using the Application
+
+### Creating Music
+
+1. **Upload your background track** (WAV format, 44.1kHz recommended)
+2. **Configure generation parameters:**
+   - Beat Detection Sensitivity: Adjust how the AI detects musical beats
+   - Creative Randomness: Higher values produce more unique compositions
+   - Vocal Style: Choose from various vocal characteristics
+3. **Click "Generate Music"** and the system will:
+   - Create a job in the queue
+   - Generate a melody based on your track
+   - Mix the melody with vocals
+   - Present the final composition
+
+### Managing Jobs
+
+- Use the **Jobs Dashboard** tab to:
+  - View all submitted jobs
+  - Check processing status
+  - Download results
+  - Cancel pending jobs
+
+## 🔍 Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Job stuck in "Processing" | Check Docker logs with `docker-compose logs melody-service` |
+| Database connection errors | Verify PostgreSQL container is running and DATABASE_URL is correct |
+| Audio playback issues | Ensure your browser supports the WAV format (Chrome/Firefox recommended) |
+
+For any other issues, check the logs:
+```bash
+docker-compose logs -f integrated-app
+```
+
+## 🛠️ Development and Extension
+
+### Adding New Models
+
+The system is designed for modularity. To integrate a new AI model:
+
+1. Create a new service container with its dependencies
+2. Add appropriate service definitions to `docker-compose.yml`
+3. Extend the `services.py` file to communicate with your new container
+4. Update the UI in `app.py` to expose new functionality
+
+### Database Migrations
+
+When modifying the database schema:
+```bash
+# Generate a migration
+docker-compose exec integrated-app alembic revision -m "description"
+
+# Apply migrations
+docker-compose exec integrated-app alembic upgrade head
+```
+
+## 📄 License and Attribution
+
+This project integrates third-party components with their respective licenses:
+- GETMusic: Research use only, see original repository for terms
+- Dreamtonics: Commercial use may require licensing
+
+## 🌟 Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
-
-## Using the Application
-
-1. **Access the Web Interface:**
-   - Open your browser and navigate to `http://localhost` (or the mapped host port).
-   - The Gradio UI will display options to:
-     - **Submit a Job:** Upload a backing track (WAV file), adjust beat estimation and randomization settings, then click "Generate Melodies".
-     - **Preview Results:** View and download the generated melody (WAV) and MIDI file.
-
-2. **Job Processing:**
-   - Submitted jobs are stored in PostgreSQL.
-   - A background worker processes jobs asynchronously, invoking the melody generation and vocal mix commands.
-   - Check job status using the "Check Status" tab if available.
-
----
-
-## Logging and Debugging
-
-- **Container Logs:**  
-  View logs for troubleshooting with:
-  ```bash
-  docker-compose logs -f integrated-app
-  ```
-- **Application Logs:**  
-  The integrated app logs key events and errors using Python’s logging module. Logs are printed to the console (and optionally to a file).
-
----
-
-## License
-
-This project uses third-party model components under their respective licenses. Please review the license information provided within each service’s repository.
-
----
-
-## Notes
-
-- **Model Services:**  
-  The melody generation and vocal mixing services are containerized and kept running via a dummy command (e.g., `tail -f /dev/null`) so that commands can be executed inside them with `docker exec`.
-- **Alembic Migrations:**  
-  Migrations are automatically run at startup using an entrypoint script.
-- **Gradio Version:**  
-  Ensure you pin a stable Gradio version if you encounter issues with share mode.
-
----
-
-Enjoy generating your music!
-
