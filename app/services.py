@@ -81,13 +81,13 @@ def run_command_in_container(container_name, command_list):
         logger.error(f"Unexpected error running command: {str(e)}", exc_info=True)
         raise
 
-def generate_melody(input_bgm, checkpoint, gen_seed, shared_dir):
+def generate_melody(input_bgm, checkpoint, gen_seed, output_dir):
     """
     Triggers the melody generation model.
     - input_bgm: Path to the original background music file (in the shared volume)
     - checkpoint: Path to the GETMusic checkpoint (inside the melody container)
     - gen_seed: The seed for generation
-    - shared_dir: The shared directory mounted into all containers
+    - output_dir: The output directory for melody files
     Returns the path to the generated melody MIDI file.
     """
     container_name = "melody-generation"
@@ -97,14 +97,13 @@ def generate_melody(input_bgm, checkpoint, gen_seed, shared_dir):
         raise RuntimeError(f"Required container '{container_name}' is not running")
     
     # Create output directory
-    output_dir = os.path.join(shared_dir, "melody_results")
     os.makedirs(output_dir, exist_ok=True)
     
     # Check if input file exists
     if not os.path.exists(input_bgm):
         raise FileNotFoundError(f"Input file {input_bgm} does not exist")
     
-    logger.info(f"Generating melody for {input_bgm} with seed {gen_seed}")
+    logger.info(f"Generating melody for {input_bgm} with seed {gen_seed} to {output_dir}")
     
     command = [
         "uv", "run", "melody_generation.py",
@@ -129,12 +128,12 @@ def generate_melody(input_bgm, checkpoint, gen_seed, shared_dir):
     
     raise FileNotFoundError(f"Melody file {melody_file} was not created after waiting")
 
-def mix_vocals(original_bgm, melody_file, shared_dir):
+def mix_vocals(original_bgm, melody_file, output_dir):
     """
     Triggers the vocal mix model.
     - original_bgm: Path to the original BGM file (in the shared volume)
     - melody_file: Path to the generated melody MIDI file
-    - shared_dir: The shared directory where outputs are stored
+    - output_dir: The output directory for vocal files
     Returns the path to the final mixed track.
     """
     container_name = "vocal-mix"
@@ -144,7 +143,6 @@ def mix_vocals(original_bgm, melody_file, shared_dir):
         raise RuntimeError(f"Required container '{container_name}' is not running")
     
     # Create output directory
-    output_dir = os.path.join(shared_dir, "vocal_results")
     os.makedirs(output_dir, exist_ok=True)
     
     # Check if input files exist
@@ -154,7 +152,7 @@ def mix_vocals(original_bgm, melody_file, shared_dir):
     if not os.path.exists(melody_file):
         raise FileNotFoundError(f"Melody file {melody_file} does not exist")
     
-    logger.info(f"Mixing vocals for {original_bgm} with melody {melody_file}")
+    logger.info(f"Mixing vocals for {original_bgm} with melody {melody_file} to {output_dir}")
     
     command = [
         "uv", "run", "make_vocalmix.py",
@@ -179,29 +177,43 @@ def mix_vocals(original_bgm, melody_file, shared_dir):
         time.sleep(3)
     
     raise FileNotFoundError(f"Mix file {mix_file} was not created after waiting")
+    
 
-def process_song(shared_dir, input_bgm, checkpoint, gen_seed):
+def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None):
     """
     Orchestrates the complete workflow:
       1. Runs melody generation.
       2. Runs vocal mixing.
       3. Returns the final mix path.
+      
+    Args:
+        shared_dir: Base shared directory
+        input_bgm: Path to input audio file
+        checkpoint: Path to model checkpoint
+        gen_seed: Generation seed
+        job_id: Optional job ID for organizing outputs
     """
     try:
-        logger.info(f"Processing song: {input_bgm}")
+        logger.info(f"Processing song: {input_bgm} for job {job_id}")
         
-        # Create output directories
-        melody_output_dir = os.path.join(shared_dir, "melody_results")
-        vocal_output_dir = os.path.join(shared_dir, "vocal_results")
+        # Create job-specific output directories if job_id is provided
+        if job_id:
+            melody_output_dir = os.path.join(shared_dir, "melody_results", f"job_{job_id}")
+            vocal_output_dir = os.path.join(shared_dir, "vocal_results", f"job_{job_id}")
+        else:
+            melody_output_dir = os.path.join(shared_dir, "melody_results")
+            vocal_output_dir = os.path.join(shared_dir, "vocal_results")
+            
+        # Create directories if they don't exist
         os.makedirs(melody_output_dir, exist_ok=True)
         os.makedirs(vocal_output_dir, exist_ok=True)
         
         # Generate melody
-        melody_file = generate_melody(input_bgm, checkpoint, gen_seed, shared_dir)
+        melody_file = generate_melody(input_bgm, checkpoint, gen_seed, melody_output_dir)
         logger.info(f"Melody file generated successfully at: {melody_file}")
         
         # Mix vocals
-        final_mix = mix_vocals(input_bgm, melody_file, shared_dir)
+        final_mix = mix_vocals(input_bgm, melody_file, vocal_output_dir)
         logger.info(f"Final mix generated successfully at: {final_mix}")
         
         return final_mix

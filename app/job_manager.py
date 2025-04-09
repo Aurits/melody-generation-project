@@ -40,8 +40,9 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             return
             
         # Run the complete song processing (melody generation and vocal mix)
+        # Pass the job_id to process_song for job-specific directories
         logger.info(f"Calling process_song with input file: {job.input_file}")
-        final_mix = process_song(shared_dir, job.input_file, checkpoint, gen_seed)
+        final_mix = process_song(shared_dir, job.input_file, checkpoint, gen_seed, job_id)
         
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
