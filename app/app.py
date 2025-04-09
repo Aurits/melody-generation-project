@@ -162,7 +162,7 @@ def poll_job_status(job_id, progress=None):
 # Recent Jobs Function
 # -------------------- 
 def get_recent_jobs():
-    """Get a list of recent jobs for display in a dataframe"""
+    """Get a list of recent jobs for display in a table format"""
     global current_job_id
     
     session = SessionLocal()
@@ -170,59 +170,96 @@ def get_recent_jobs():
         jobs = session.query(Job).order_by(desc(Job.created_at)).limit(10).all()
         
         if not jobs:
-            return None
+            return "No recent jobs"
         
-        # Create lists for each column
-        job_ids = []
-        statuses = []
-        durations = []
-        parameters_list = []
-        input_files = []
-        output_files = []
+        # Create a table header
+        table_html = """
+        <style>
+        .job-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .job-table th, .job-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .current-job {
+            font-weight: bold;
+        }
+        .status-completed {
+            color: #10b981;
+        }
+        .status-failed {
+            color: #ef4444;
+        }
+        .status-processing {
+            color: #f59e0b;
+        }
+        .status-pending {
+            color: #6b7280;
+        }
+        </style>
+        <table class="job-table">
+            <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Parameters</th>
+                    <th>Input File</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
         
+        # Add rows for each job
         for job in jobs:
-            # Add emoji based on status
-            if job.status == "completed":
-                status_display = "✅ completed"
-            elif job.status == "failed":
-                status_display = "❌ failed"
-            elif job.status == "processing":
-                status_display = "⏳ processing"
-            else:
-                status_display = "⏱️ pending"
-            
             # Calculate and format job duration
             duration = calculate_job_duration(job)
             duration_display = format_duration(duration) if duration else "In progress"
             
+            # Add emoji and class based on status
+            if job.status == "completed":
+                status_emoji = "✅"
+                status_class = "status-completed"
+            elif job.status == "failed":
+                status_emoji = "❌"
+                status_class = "status-failed"
+            elif job.status == "processing":
+                status_emoji = "⏳"
+                status_class = "status-processing"
+            else:
+                status_emoji = "⏱️"
+                status_class = "status-pending"
+            
+            # Highlight current job
+            row_class = "current-job" if current_job_id and job.id == current_job_id else ""
+            
             # Format parameters for display
             parameters = job.parameters.replace(",", ", ") if job.parameters else "None"
             
-            # Get input and output file names (not full paths)
+            # Get input file name (not full path)
             input_file = os.path.basename(job.input_file) if job.input_file else "None"
-            output_file = os.path.basename(job.output_file) if job.output_file else "None"
             
-            # Highlight current job with an asterisk
-            job_id_display = f"{job.id} *" if current_job_id and job.id == current_job_id else f"{job.id}"
-            
-            job_ids.append(job_id_display)
-            statuses.append(status_display)
-            durations.append(duration_display)
-            parameters_list.append(parameters)
-            input_files.append(input_file)
-            output_files.append(output_file)
+            table_html += f"""
+            <tr class="{row_class}">
+                <td>{job.id}</td>
+                <td class="{status_class}">{status_emoji} {job.status}</td>
+                <td>{duration_display}</td>
+                <td>{parameters}</td>
+                <td>{input_file}</td>
+            </tr>
+            """
         
-        # Create a dictionary for the dataframe
-        data = {
-            "Job ID": job_ids,
-            "Status": statuses,
-            "Duration": durations,
-            "Parameters": parameters_list,
-            "Input File": input_files,
-            "Output File": output_files
-        }
+        table_html += """
+            </tbody>
+        </table>
+        """
         
-        return data
+        return table_html
     finally:
         session.close()
 
@@ -350,7 +387,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
         session.close()
         
         # Update the recent jobs display
-        recent_jobs_data = get_recent_jobs()
+        recent_jobs_html = get_recent_jobs()
         current_job_status = get_current_job_status()
         
         # Poll for job completion
@@ -359,10 +396,21 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
 
         # Process the results
         if status == "completed":
-            # Define output filenames with job ID and seed
-            vocal_filename = f"job_{job_id}_vocal_melody_seed{seed}.wav"
-            mixed_filename = f"job_{job_id}_mixed_audio_seed{seed}.wav"
-            midi_filename = f"job_{job_id}_melody_seed{seed}.mid"
+            # Generate a unique ID for this generation
+            unique_id = str(uuid.uuid4())[:8]
+            
+            # Get the original filename base (without extension)
+            if isinstance(file, str):
+                original_filename = os.path.basename(file)
+            else:
+                original_filename = os.path.basename(file.name)
+            
+            input_filename_base, input_ext = os.path.splitext(original_filename)
+            
+            # Define output filenames with the requested format
+            vocal_filename = f"vocal_melody_{input_filename_base}_seed{seed}_{unique_id}.wav"
+            mixed_filename = f"mixed_audio_{input_filename_base}_seed{seed}_{unique_id}.wav"
+            midi_filename = f"melody_{input_filename_base}_seed{seed}_{unique_id}.mid"
             
             # Define paths in job-specific directories
             vocal_path = os.path.join(job_vocal_dir, vocal_filename)
@@ -386,8 +434,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                 
             if os.path.exists(midi_file_path):
                 shutil.copy2(midi_file_path, midi_path)
-                logger.info(f"Copied MIDI file to {midi_path}")
-            
+                logger.info(f"Copied MIDI file to {midi_path}")            
             # Verify output files exist
             files_exist = (
                 os.path.exists(vocal_path) and 
@@ -424,11 +471,11 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                 logger.info(f"Returning MIDI path: {midi_path}")
                 
                 # Update recent jobs display and current job status
-                recent_jobs_data = get_recent_jobs()
+                recent_jobs_html = get_recent_jobs()
                 current_job_status = get_current_job_status()
                 
                 # Return all outputs
-                return success_message, vocal_path, mixed_path, midi_path, recent_jobs_data, current_job_status
+                return success_message, vocal_path, mixed_path, midi_path, recent_jobs_html, current_job_status
             else:
                 error_message = f"⚠️ Job completed but some files are missing (Job ID: {job_id})"
                 return error_message, None, None, None, get_recent_jobs(), get_current_job_status()
@@ -456,11 +503,10 @@ with gr.Blocks(title="Melody Generator") as demo:
             gr.Markdown("Upload a backing track (WAV) to generate vocal melodies.")
         
         with gr.Column(scale=1, elem_id="status-panel"):
-            with gr.Box():
-                gr.Markdown("### Current Job")
-                current_job_status = gr.Markdown(get_current_job_status())
-                refresh_btn = gr.Button("Refresh Status")
-                refresh_btn.click(fn=get_current_job_status, outputs=current_job_status)
+            gr.Markdown("### Current Job")
+            current_job_status = gr.Markdown(get_current_job_status())
+            refresh_btn = gr.Button("Refresh Status")
+            refresh_btn.click(fn=get_current_job_status, outputs=current_job_status)
 
     # Main content
     with gr.Tabs():
@@ -469,138 +515,122 @@ with gr.Blocks(title="Melody Generator") as demo:
             with gr.Row():
                 # Left column - Input controls
                 with gr.Column():
-                    with gr.Box():
-                        gr.Markdown("### Input")
-                        file_input = gr.Audio(
-                            label="Upload Backing Track (WAV)",
-                            type="filepath"
-                        )
+                    gr.Markdown("### Input")
+                    file_input = gr.Audio(
+                        label="Upload Backing Track (WAV)",
+                        type="filepath"
+                    )
                     
                     with gr.Accordion("Advanced Settings", open=False):
-                        with gr.Box():
-                            gr.Markdown("#### Beat Estimation")
-                            gr.Markdown(
-                                "You can optionally provide a start time and BPM for better control. "
-                                "If left blank, the system will estimate these values automatically."
+                        gr.Markdown("#### Beat Estimation")
+                        gr.Markdown(
+                            "You can optionally provide a start time and BPM for better control. "
+                            "If left blank, the system will estimate these values automatically."
+                        )
+                        
+                        with gr.Row():
+                            start_time = gr.Number(
+                                label="Song start time (seconds)",
+                                value=0,
+                                precision=2,
+                                interactive=True
                             )
                             
-                            with gr.Row():
-                                start_time = gr.Number(
-                                    label="Song start time (seconds)",
-                                    value=0,
-                                    precision=2,
-                                    interactive=True
-                                )
-                                
-                                bpm = gr.Number(
-                                    label="BPM (integer)",
-                                    value=0,
-                                    precision=0,
-                                    interactive=True
-                                )
+                            bpm = gr.Number(
+                                label="BPM (integer)",
+                                value=0,
+                                precision=0,
+                                interactive=True
+                            )
                         
-                        with gr.Box():
-                            gr.Markdown("#### Randomization Control")
+                        gr.Markdown("#### Randomization Control")
+                        
+                        with gr.Row():
+                            seed = gr.Number(
+                                label="Seed (optional, integer)",
+                                value=0,
+                                precision=0,
+                                interactive=True
+                            )
                             
-                            with gr.Row():
-                                seed = gr.Number(
-                                    label="Seed (optional, integer)",
-                                    value=0,
-                                    precision=0,
-                                    interactive=True
-                                )
-                                
-                                randomize_seed = gr.Checkbox(
-                                    label="Randomize Seed",
-                                    value=True,
-                                    interactive=True
-                                )
-                            
-                            randomize_btn = gr.Button("New Random Seed")
-                            randomize_btn.click(fn=randomize_seed_value, outputs=seed)
+                            randomize_seed = gr.Checkbox(
+                                label="Randomize Seed",
+                                value=True,
+                                interactive=True
+                            )
+                        
+                        randomize_btn = gr.Button("New Random Seed")
+                        randomize_btn.click(fn=randomize_seed_value, outputs=seed)
                     
-                    with gr.Box():
-                        status_message = gr.Markdown("Upload a track and click Generate.")
-                        generate_btn = gr.Button("Generate Melodies", variant="primary", size="lg")
+                    status_message = gr.Markdown("Upload a track and click Generate.")
+                    generate_btn = gr.Button("Generate Melodies", variant="primary", size="lg")
                 
                 # Right column - Preview outputs
                 with gr.Column():
                     gr.Markdown("### Preview")
                     
-                    with gr.Group():
-                        with gr.Box():
-                            gr.Markdown("#### Vocal Melody")
-                            vocal_preview = gr.Audio(
-                                label="Vocal Track (WAV)",
-                                type="filepath",
-                                value=None, 
-                                interactive=False,
-                                autoplay=False,
-                                show_download_button=True,
-                            )
+                    gr.Markdown("#### Vocal Melody")
+                    vocal_preview = gr.Audio(
+                        label="Vocal Track (WAV)",
+                        type="filepath",
+                        value=None, 
+                        interactive=False,
+                        autoplay=False,
+                        show_download_button=True,
+                    )
 
-                        with gr.Box():
-                            gr.Markdown("#### Mixed Track")
-                            mixed_preview = gr.Audio(
-                                label="Mixed Track (WAV)",
-                                type="filepath",
-                                value=None, 
-                                interactive=False,
-                                autoplay=True,
-                                show_download_button=True,
-                            )
-                        
-                        with gr.Box():
-                            gr.Markdown("#### MIDI File")
-                            midi_preview = gr.File(
-                                label="MIDI Melody",
-                                value=None,  
-                                interactive=False,
-                                file_count="single",
-                                type="file",
-                            )
+                    gr.Markdown("#### Mixed Track")
+                    mixed_preview = gr.Audio(
+                        label="Mixed Track (WAV)",
+                        type="filepath",
+                        value=None, 
+                        interactive=False,
+                        autoplay=True,
+                        show_download_button=True,
+                    )
+                    
+                    gr.Markdown("#### MIDI File")
+                    midi_preview = gr.File(
+                        label="MIDI Melody",
+                        value=None,  
+                        interactive=False,
+                        file_count="single",
+                        type="filepath",
+                    )
         
         # Recent Jobs tab
         with gr.TabItem("Recent Jobs"):
-            with gr.Box():
-                gr.Markdown("### Recent Jobs")
-                refresh_jobs_btn = gr.Button("Refresh Jobs")
-                recent_jobs_list = gr.Dataframe(
-                    headers=["Job ID", "Status", "Duration", "Parameters", "Input File", "Output File"],
-                    datatype=["str", "str", "str", "str", "str", "str"],
-                    value=get_recent_jobs(),
-                    interactive=False,
-                    wrap=True
-                )
-                refresh_jobs_btn.click(fn=get_recent_jobs, outputs=recent_jobs_list)
+            gr.Markdown("### Recent Jobs")
+            recent_jobs_list = gr.HTML(get_recent_jobs())
+            refresh_jobs_btn = gr.Button("Refresh Jobs")
+            refresh_jobs_btn.click(fn=get_recent_jobs, outputs=recent_jobs_list)
         
         # About tab
         with gr.TabItem("About"):
-            with gr.Box():
-                gr.Markdown("""
-                ## About Melody Generator
-                
-                This application uses AI to generate vocal melodies from backing tracks.
-                
-                ### How it works:
-                
-                1. Upload a backing track (WAV file)
-                2. Optionally adjust settings like start time, BPM, and seed
-                3. Click "Generate Melodies"
-                4. The system will process your track and generate:
-                   - A vocal melody track
-                   - A mixed track (vocals + backing)
-                   - A MIDI file of the melody
-                
-                ### Technical Details:
-                
-                The application uses Docker containers to run specialized AI models:
-                - Melody generation model creates the initial melody
-                - Vocal synthesis model converts the melody to vocals
-                - Audio mixing combines the vocals with your backing track
-                
-                Jobs are processed in the background and results are available when processing completes.
-                """)
+            gr.Markdown("""
+            ## About Melody Generator
+            
+            This application uses AI to generate vocal melodies from backing tracks.
+            
+            ### How it works:
+            
+            1. Upload a backing track (WAV file)
+            2. Optionally adjust settings like start time, BPM, and seed
+            3. Click "Generate Melodies"
+            4. The system will process your track and generate:
+               - A vocal melody track
+               - A mixed track (vocals + backing)
+               - A MIDI file of the melody
+            
+            ### Technical Details:
+            
+            The application uses Docker containers to run specialized AI models:
+            - Melody generation model creates the initial melody
+            - Vocal synthesis model converts the melody to vocals
+            - Audio mixing combines the vocals with your backing track
+            
+            Jobs are processed in the background and results are available when processing completes.
+            """)
     
     # Connect the generate button to the process function
     generate_btn.click(
