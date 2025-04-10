@@ -2,6 +2,9 @@
 tmik_bgm_conditional_melody_generation
 tmik_make_vocal_mix
 
+# shared data
+shared_data
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -4,6 +4,7 @@ services:
   postgres:
     image: postgres:10.8-alpine
     container_name: postgres-database
+    restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -23,6 +24,7 @@ services:
       context: ./tmik_bgm_conditional_melody_generation
       dockerfile: Dockerfile
     container_name: melody-generation
+    restart: always
     environment:
       - CHECKPOINT_PATH=/app/checkpoints/checkpoint.pth
       - BGMPATH=/app/testdata/test.mid
@@ -46,6 +48,7 @@ services:
       context: ./tmik_make_vocal_mix
       dockerfile: Dockerfile
     container_name: vocal-mix
+    restart: always
     environment:
       - DREAMTONICS_SDK_PATH=/app/dreamtonics_sdk
       - SEX=female
@@ -69,6 +72,7 @@ services:
       context: ./app
       dockerfile: Dockerfile
     container_name: integrated-app
+    restart: always
     ports:
       - "80:7860"  # Map host port 80 to container port 7860
     environment:
