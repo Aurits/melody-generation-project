@@ -6,7 +6,7 @@ import logging
 import os
 from models import SessionLocal, Job
 from services import process_song, check_container_running
-from gcp_storage import upload_job_files_to_gcp
+from gcp_storage import upload_job_results
 
 
 # Set up logging
@@ -64,7 +64,6 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
         
-        # Replace the GCP upload section in process_job with this:
         # Try to upload files to GCP
         gcp_urls = None
         try:
@@ -88,11 +87,10 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             if not os.path.exists(vocal_file):
                 vocal_file = None
             
-            # Upload files to GCP using the new function
-            from gcp_upload import upload_job_results
+            # Upload files to GCP using the correct function
             gcp_urls = upload_job_results(
                 job_id, 
-                input_file=job.input_file,  # Include the input file
+                input_file=job.input_file,
                 melody_file=midi_file,
                 vocal_file=vocal_file,
                 mixed_file=final_mix

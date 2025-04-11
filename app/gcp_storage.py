@@ -16,6 +16,29 @@ SERVICE_ACCOUNT_FILE = "access.json"
 # GCP bucket name
 BUCKET_NAME = "melody_generation_api_bucket"
 
+def initialize_gcp_credentials():
+    """
+    Initialize GCP credentials and validate access to the bucket.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        client = get_storage_client()
+        if not client:
+            logger.error("Failed to create storage client")
+            return False
+            
+        # Test if we can access the bucket
+        bucket = client.bucket(BUCKET_NAME)
+        if bucket.exists():
+            logger.info(f"Successfully connected to bucket: {BUCKET_NAME}")
+            return True
+        else:
+            logger.error(f"Bucket {BUCKET_NAME} does not exist")
+            return False
+    except Exception as e:
+        logger.error(f"Error initializing GCP credentials: {str(e)}")
+        return False
+
 def get_storage_client():
     """
     Create and return a Google Cloud Storage client using service account credentials.
