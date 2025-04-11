@@ -63,6 +63,7 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
         
+        # Replace the GCP upload section in process_job with this:
         # Try to upload files to GCP
         gcp_urls = None
         try:
@@ -86,12 +87,14 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             if not os.path.exists(vocal_file):
                 vocal_file = None
             
-            # Upload files to GCP
-            gcp_urls = upload_job_files_to_gcp(
+            # Upload files to GCP using the new function
+            from gcp_upload import upload_job_results
+            gcp_urls = upload_job_results(
                 job_id, 
-                vocal_path=vocal_file,
-                mixed_path=final_mix,
-                midi_path=midi_file
+                input_file=job.input_file,  # Include the input file
+                melody_file=midi_file,
+                vocal_file=vocal_file,
+                mixed_file=final_mix
             )
             
             # Store the GCP URL in the job record if available

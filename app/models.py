@@ -17,6 +17,7 @@ class Job(Base):
     input_file = Column(Text)
     output_file = Column(Text)
     parameters = Column(Text)  # Added the missing parameters field
+    gcp_url = Column(Text)  # Added GCP URL field
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
