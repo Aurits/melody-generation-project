@@ -4,13 +4,13 @@ import os
 import time
 import logging
 import gradio as gr
+from gcp_storage import initialize_gcp_credentials
 from models import SessionLocal, Job, init_db
 from job_manager import start_worker
 from sqlalchemy import desc
 import datetime
 import shutil
 import uuid
-from gcp_storage import initialize_gcp_credentials
 
 # -------------------- 
 # Configure Logging

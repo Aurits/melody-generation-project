@@ -1,4 +1,4 @@
-# gcp_upload.py
+# gcp_storage.py
 # Simple module for uploading melody generation files to Google Cloud Storage
 
 import os
