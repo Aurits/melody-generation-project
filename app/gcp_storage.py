@@ -56,14 +56,14 @@ def get_storage_client():
 
 def upload_file(local_file_path, gcp_path):
     """
-    Upload a single file to GCP Storage.
+    Upload a single file to GCP Storage and generate a signed URL.
     
     Args:
         local_file_path: Path to the local file
         gcp_path: Destination path in GCP bucket
         
     Returns:
-        Public URL of the uploaded file if successful, None otherwise
+        Signed URL of the uploaded file if successful, None otherwise
     """
     if not os.path.exists(local_file_path):
         logger.warning(f"File not found: {local_file_path}")
@@ -80,11 +80,19 @@ def upload_file(local_file_path, gcp_path):
         # Upload the file
         blob.upload_from_filename(local_file_path)
         
-        # Make it publicly accessible
-        blob.make_public()
+        # Instead of making public, generate a signed URL with expiration time
+        import datetime
+        
+        # Generate a signed URL that expires in 7 days
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(days=7),
+            method="GET"
+        )
         
         logger.info(f"Uploaded {local_file_path} to gs://{BUCKET_NAME}/{gcp_path}")
-        return blob.public_url
+        logger.info(f"Created signed URL with 7-day expiration")
+        return signed_url
         
     except Exception as e:
         logger.error(f"Error uploading {local_file_path}: {str(e)}")
