@@ -7,7 +7,7 @@ import os
 from models import SessionLocal, Job
 from services import process_song, check_container_running
 from gcp_storage import upload_job_results
-
+from gcp_storage import upload_job_files
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -57,49 +57,25 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             return
             
         # Run the complete song processing (melody generation and vocal mix)
-        # Pass the job_id, parameters, and job-specific seed to process_song
         logger.info(f"Calling process_song with input file: {job.input_file}")
         final_mix = process_song(shared_dir, job.input_file, checkpoint, job_seed, job_id, start_time, bpm)
         
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
         
-        # Try to upload files to GCP
-        gcp_urls = None
+        # Try to upload files to GCP using the enhanced method
         try:
-            # Get paths to all generated files
-            job_melody_dir = os.path.join(shared_dir, "melody_results", f"job_{job_id}")
-            job_vocal_dir = os.path.join(shared_dir, "vocal_results", f"job_{job_id}")
-            
-            # Find the MIDI file
-            midi_file = None
-            possible_midi_paths = [
-                os.path.join(job_melody_dir, "melody.mid"),
-                os.path.join(shared_dir, "melody_results", "melody.mid")
-            ]
-            for path in possible_midi_paths:
-                if os.path.exists(path):
-                    midi_file = path
-                    break
-            
-            # Find the vocal file
-            vocal_file = os.path.join(job_vocal_dir, "vocal.wav")
-            if not os.path.exists(vocal_file):
-                vocal_file = None
-            
-            # Upload files to GCP using the correct function
-            gcp_urls = upload_job_results(
-                job_id, 
-                input_file=job.input_file,
-                melody_file=midi_file,
-                vocal_file=vocal_file,
-                mixed_file=final_mix
-            )
+            # Upload ALL files from job-specific directories using the upload_job_files function
+            # This will include timestamps in folder names and scan all files in the directories
+            gcp_urls = upload_job_files(job_id, shared_dir)
             
             # Store the GCP URL in the job record if available
-            if gcp_urls and 'mixed' in gcp_urls:
-                job.gcp_url = gcp_urls['mixed']
-                logger.info(f"Stored GCP URL in job record: {job.gcp_url}")
+            if gcp_urls and any(k for k in gcp_urls.keys() if 'mixed' in k):
+                # Find the first key containing 'mixed'
+                mixed_key = next((k for k in gcp_urls.keys() if 'mixed' in k), None)
+                if mixed_key:
+                    job.gcp_url = gcp_urls[mixed_key]
+                    logger.info(f"Stored GCP URL in job record: {job.gcp_url}")
             
         except Exception as e:
             logger.error(f"Error uploading files to GCP: {str(e)}", exc_info=True)
