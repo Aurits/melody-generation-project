@@ -109,7 +109,7 @@ def format_duration(seconds):
 def poll_job_status(job_id, progress=None):
     """Poll the job status until it's completed or failed"""
     session = SessionLocal()
-    max_attempts = 60  # 5 minutes (5s * 60)
+    max_attempts = 120  # 5 minutes (5s * 60)
     attempt = 0
     
     try:
