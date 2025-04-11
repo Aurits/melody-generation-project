@@ -114,7 +114,8 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, b
         "--load_path", checkpoint,
         "--bgm_filepath", input_bgm,
         "--gen_seed", str(gen_seed),
-        "--output_dir", output_dir
+        "--output_dir", output_dir,
+        "--one_shot_generation"
     ]
     
     # Only add start_time and bpm if at least one is non-zero
