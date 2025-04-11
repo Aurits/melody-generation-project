@@ -10,6 +10,7 @@ from sqlalchemy import desc
 import datetime
 import shutil
 import uuid
+from gcp_storage import initialize_gcp_credentials
 
 # -------------------- 
 # Configure Logging
