@@ -4,6 +4,7 @@ import os
 import time
 import logging
 import gradio as gr
+from gcp_storage import initialize_gcp_credentials
 from models import SessionLocal, Job, init_db
 from job_manager import start_worker
 from sqlalchemy import desc
