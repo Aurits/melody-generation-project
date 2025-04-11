@@ -10,7 +10,6 @@ from services import process_song, check_container_running
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# In job_manager.py - Parse parameters and pass them to process_song
 def process_job(job_id, checkpoint, gen_seed, shared_dir):
     """
     Process a single job by ID.
@@ -35,10 +34,17 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         # Parse job parameters
         start_time = 0
         bpm = 0
+        job_seed = gen_seed  # Default to global seed
+        
         if job.parameters:
             params = dict(param.split('=') for param in job.parameters.split(','))
             start_time = float(params.get('start_time', 0))
             bpm = int(float(params.get('bpm', 0)))
+            
+            # Extract the job-specific seed if available
+            if 'seed' in params:
+                job_seed = int(float(params.get('seed', gen_seed)))
+                logger.info(f"Using job-specific seed: {job_seed}")
         
         # Check if the input file exists
         if not os.path.exists(job.input_file):
@@ -49,9 +55,9 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             return
             
         # Run the complete song processing (melody generation and vocal mix)
-        # Pass the job_id and parameters to process_song
+        # Pass the job_id, parameters, and job-specific seed to process_song
         logger.info(f"Calling process_song with input file: {job.input_file}")
-        final_mix = process_song(shared_dir, job.input_file, checkpoint, gen_seed, job_id, start_time, bpm)
+        final_mix = process_song(shared_dir, job.input_file, checkpoint, job_seed, job_id, start_time, bpm)
         
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
