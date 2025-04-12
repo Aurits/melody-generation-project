@@ -115,7 +115,9 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, b
         "--bgm_filepath", input_bgm,
         "--gen_seed", str(gen_seed),
         "--output_dir", output_dir,
-        "--one_shot_generation"
+        "--one_shot_generation",
+        "--output_beat_estimation_mix",  # Add flag for beat estimation mix
+        "--output_synth_demo"            # Add flag for synth demo
     ]
     
     # Only add start_time and bpm if at least one is non-zero
@@ -143,7 +145,7 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, b
         time.sleep(3)
     
     raise FileNotFoundError(f"Melody file {melody_file} was not created after waiting")
-    
+
 def mix_vocals(original_bgm, melody_file, output_dir):
     """
     Triggers the vocal mix model.
@@ -193,13 +195,13 @@ def mix_vocals(original_bgm, melody_file, output_dir):
         time.sleep(3)
     
     raise FileNotFoundError(f"Mix file {mix_file} was not created after waiting")
-    
+   
 def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0):
     """
     Orchestrates the complete workflow:
       1. Runs melody generation.
       2. Runs vocal mixing.
-      3. Returns the final mix path.
+      3. Returns the final mix path and beat mix path.
       
     Args:
         shared_dir: Base shared directory
@@ -230,11 +232,20 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         melody_file = generate_melody(input_bgm, checkpoint, gen_seed, melody_output_dir, start_time, bpm)
         logger.info(f"Melody file generated successfully at: {melody_file}")
         
+        # Check for beat_mixed_synth_mix.wav file
+        beat_mix_file = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
+        if os.path.exists(beat_mix_file):
+            logger.info(f"Beat mix file found at: {beat_mix_file}")
+        else:
+            logger.warning(f"Beat mix file not found at: {beat_mix_file}")
+            beat_mix_file = None
+        
         # Mix vocals
         final_mix = mix_vocals(input_bgm, melody_file, vocal_output_dir)
         logger.info(f"Final mix generated successfully at: {final_mix}")
         
-        return final_mix
+        # Return both the final mix and beat mix file paths
+        return final_mix, beat_mix_file
         
     except Exception as e:
         logger.error(f"Error in process_song: {str(e)}", exc_info=True)

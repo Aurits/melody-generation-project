@@ -8,6 +8,7 @@ from models import SessionLocal, Job
 from services import process_song, check_container_running
 from gcp_storage import upload_job_results
 from gcp_storage import upload_job_files
+import json
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -58,10 +59,19 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             
         # Run the complete song processing (melody generation and vocal mix)
         logger.info(f"Calling process_song with input file: {job.input_file}")
-        final_mix = process_song(shared_dir, job.input_file, checkpoint, job_seed, job_id, start_time, bpm)
+        final_mix, beat_mix_file = process_song(shared_dir, job.input_file, checkpoint, job_seed, job_id, start_time, bpm)
         
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
+        
+        # Store the beat mix file path in the job parameters if available
+        if beat_mix_file and os.path.exists(beat_mix_file):
+            # Add beat_mix_file to job parameters
+            if job.parameters:
+                job.parameters += f",beat_mix_file={beat_mix_file}"
+            else:
+                job.parameters = f"beat_mix_file={beat_mix_file}"
+            logger.info(f"Added beat mix file to job parameters: {beat_mix_file}")
         
         # Try to upload files to GCP using the enhanced method
         try:
@@ -69,17 +79,30 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             # This will include timestamps in folder names and scan all files in the directories
             gcp_urls = upload_job_files(job_id, shared_dir)
             
-            # Store the GCP URL in the job record if available
-            if gcp_urls and any(k for k in gcp_urls.keys() if 'mixed' in k):
-                # Find the first key containing 'mixed'
-                mixed_key = next((k for k in gcp_urls.keys() if 'mixed' in k), None)
-                if mixed_key:
-                    job.gcp_url = gcp_urls[mixed_key]
-                    logger.info(f"Stored GCP URL in job record: {job.gcp_url}")
+            # Store all GCP URLs in a JSON format in the job record
+            if gcp_urls:
+                # Convert the URLs dictionary to a JSON string
+                gcp_urls_json = json.dumps(gcp_urls)
+                
+                # Store the JSON string in the job parameters
+                if job.parameters:
+                    job.parameters += f",gcp_urls_json={gcp_urls_json}"
+                else:
+                    job.parameters = f"gcp_urls_json={gcp_urls_json}"
+                logger.info(f"Stored all GCP URLs in job parameters as JSON")
+                
+                # Also store the mixed track URL in the gcp_url field for backward compatibility
+                if any(k for k in gcp_urls.keys() if 'mixed' in k):
+                    # Find the first key containing 'mixed'
+                    mixed_key = next((k for k in gcp_urls.keys() if 'mixed' in k), None)
+                    if mixed_key:
+                        job.gcp_url = gcp_urls[mixed_key]
+                        logger.info(f"Stored GCP URL in job record: {job.gcp_url}")
             
         except Exception as e:
             logger.error(f"Error uploading files to GCP: {str(e)}", exc_info=True)
             logger.info("Continuing with job processing despite GCP upload failure")
+        
         
         # Mark job as completed
         job.status = "completed"
@@ -93,7 +116,7 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         session.commit()
     finally:
         session.close()
-
+        
 def job_worker(checkpoint, gen_seed, shared_dir):
     """
     Background worker that continuously checks for pending jobs.

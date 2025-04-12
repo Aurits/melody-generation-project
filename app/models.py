@@ -20,6 +20,7 @@ class Job(Base):
     output_file = Column(Text)
     parameters = Column(Text)  # Parameters field for storing job configuration
     gcp_url = Column(Text)  # GCP URL field for storing public access URLs
+    gcp_urls_json = Column(Text)  # New column for storing all GCP URLs as JSON
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
