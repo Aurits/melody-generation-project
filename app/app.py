@@ -174,7 +174,7 @@ def get_recent_jobs():
         if not jobs:
             return "No recent jobs"
         
-        # Create a table header with additional styling for the file listings
+        # Create a table header with clean styling and toggle switch
         table_html = """
         <style>
         .job-table {
@@ -203,58 +203,83 @@ def get_recent_jobs():
         .status-pending {
             color: #6b7280;
         }
-        .file-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 8px;
-            margin-top: 10px;
+        .file-list {
+            max-height: 120px;
+            overflow-y: auto;
+            margin-top: 5px;
+            border: 0px solid #ddd;
+            border-radius: 5px;
+            padding: 4px;
         }
         .file-item {
             display: flex;
             align-items: center;
             padding: 6px 10px;
-            background-color: #f3f4f6;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            transition: background-color 0.2s;
+            border-bottom: 1px solid #eee;
             text-decoration: none;
             color: #4b5563;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        .file-item:last-child {
+            border-bottom: none;
+        }
         .file-item:hover {
-            background-color: #e5e7eb;
+            color: #2563eb;
         }
         .file-icon {
             margin-right: 6px;
             font-size: 1rem;
         }
-        .files-container {
-            margin-top: 8px;
+        
+        /* Toggle switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 24px;
         }
-        .files-toggle-btn {
-            background-color: #f3f4f6;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            padding: 4px 10px;
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
             cursor: pointer;
-            color: #4b5563;
-            font-size: 0.9rem;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #2563eb;
+        }
+        input:checked + .slider:before {
+            transform: translateX(36px);
+        }
+        .toggle-label {
             display: inline-flex;
             align-items: center;
             margin-bottom: 8px;
         }
-        .files-toggle-btn:hover {
-            background-color: #e5e7eb;
-        }
-        .file-count {
-            display: inline-block;
-            background-color: #e5e7eb;
-            border-radius: 9999px;
-            padding: 2px 8px;
-            font-size: 0.75rem;
-            margin-left: 6px;
+        .toggle-text {
+            margin-right: 10px;
         }
         </style>
         <table class="job-table">
@@ -293,7 +318,7 @@ def get_recent_jobs():
             # Highlight current job
             row_class = "current-job" if current_job_id and job.id == current_job_id else ""
             
-            # Format parameters for display (excluding the gcp_urls_json parameter)
+            # Format parameters for display
             parameters = job.parameters.replace(",", ", ") if job.parameters else "None"
             
             # Extract GCP URLs from dedicated JSON column
@@ -319,34 +344,36 @@ def get_recent_jobs():
                         except Exception as e:
                             logger.error(f"Fallback parsing also failed: {str(e)}")
             
-            # Create file listings HTML without mapping - just showing raw filenames
+            # Create file listings HTML with toggle switch
             file_count = len(gcp_urls)
             files_html = ""
             
             if gcp_urls:
-                # Create a better toggle button implementation
                 toggle_id = f"toggle-job-{job.id}-files"
                 container_id = f"job-{job.id}-files"
                 
                 files_html = f"""
-                <div class="files-container">
-                    <button id="{toggle_id}" class="files-toggle-btn" onclick="document.getElementById('{container_id}').style.display = document.getElementById('{container_id}').style.display === 'none' ? 'grid' : 'none';">
-                        Show/Hide Files <span class="file-count">{file_count}</span>
-                    </button>
-                    <div id="{container_id}" class="file-grid" style="display: none;">
+                <div class="toggle-label">
+                    <span class="toggle-text">Show/Hide Files</span>
+                    <label class="switch">
+                        <input type="checkbox" id="{toggle_id}" onchange="document.getElementById('{container_id}').style.display = this.checked ? 'block' : 'none';">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div id="{container_id}" class="file-list" style="display: none;">
                 """
                 
-                # Loop through all files and create a grid of file links with just the raw filenames
+                # Loop through all files and create a vertical list with just filenames
                 for key, url in gcp_urls.items():
-                    # Determine file type icon based on extension (simplified)
+                    # Determine file type icon based on extension
                     file_icon = "📄"  # Default icon
                     
                     # Get basic file extension
-                    if key.endswith('.mid'):
+                    if ".mid" in key:
                         file_icon = "🎹"  # MIDI
-                    elif key.endswith('.wav'):
+                    elif ".wav" in key:
                         file_icon = "🔊"  # Audio
-                    elif key.endswith('.json'):
+                    elif ".json" in key:
                         file_icon = "📋"  # JSON
                     
                     # Just use the filename as is - no mapping
@@ -356,7 +383,7 @@ def get_recent_jobs():
                     </a>
                     """
                 
-                files_html += "</div></div>"
+                files_html += "</div>"
             else:
                 files_html = "No files available"
             
@@ -379,6 +406,7 @@ def get_recent_jobs():
     finally:
         session.close()
 
+        
 # Function to get current job status
 def get_current_job_status():
     """Get the status of the current job if one exists"""
@@ -607,16 +635,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             session = SessionLocal()
             job = session.query(Job).filter(Job.id == job_id).first()
             job.output_file = mixed_path if os.path.exists(mixed_path) else output_file
-            
-            # Store the beat mix file path in the job parameters if available
-            if "beat_mix" in files_copied:
-                # Add beat_mix_file to job parameters
-                if job.parameters:
-                    job.parameters += f",beat_mix_file={beat_mix_path}"
-                else:
-                    job.parameters = f"beat_mix_file={beat_mix_path}"
-                logger.info(f"Added beat mix file to job parameters: {beat_mix_path}")
-            
+            #  
             session.commit()
             session.close()
             
