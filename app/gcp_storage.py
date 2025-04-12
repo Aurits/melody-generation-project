@@ -1,11 +1,12 @@
 # gcp_storage.py
-# Simple module for uploading melody generation files to Google Cloud Storage
+# Enhanced module for uploading melody generation files to Google Cloud Storage with timestamps
 
 import os
 import json
 import logging
 from google.cloud import storage
 import glob
+import datetime
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ def upload_file(local_file_path, gcp_path):
         # Upload the file
         blob.upload_from_filename(local_file_path)
         
-        # Instead of making public, generate a signed URL with expiration time
+        # Generate a signed URL with expiration time
         import datetime
         
         # Generate a signed URL that expires in 7 days
@@ -100,7 +101,7 @@ def upload_file(local_file_path, gcp_path):
 
 def upload_job_files(job_id, shared_dir):
     """
-    Upload all files for a specific job to GCP.
+    Upload all files for a specific job to GCP with timestamp in folder name.
     
     Args:
         job_id: The job ID
@@ -112,6 +113,10 @@ def upload_job_files(job_id, shared_dir):
     urls = {}
     
     try:
+        # Generate timestamp for folder names
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp_folder = f"job_{job_id}_{timestamp}"
+        
         # Define job-specific directories
         job_input_dir = os.path.join(shared_dir, "input", f"job_{job_id}")
         job_melody_dir = os.path.join(shared_dir, "melody_results", f"job_{job_id}")
@@ -121,30 +126,52 @@ def upload_job_files(job_id, shared_dir):
         input_files = glob.glob(os.path.join(job_input_dir, "*"))
         for input_file in input_files:
             filename = os.path.basename(input_file)
-            gcp_path = f"job_{job_id}/input/{filename}"
+            gcp_path = f"{timestamp_folder}/input/{filename}"
             url = upload_file(input_file, gcp_path)
             if url:
                 urls[f"input_{filename}"] = url
         
-        # Upload melody files
+        # Upload melody files - including all files in the directory
         melody_files = glob.glob(os.path.join(job_melody_dir, "*"))
         for melody_file in melody_files:
             filename = os.path.basename(melody_file)
-            gcp_path = f"job_{job_id}/melody/{filename}"
+            gcp_path = f"{timestamp_folder}/melody/{filename}"
             url = upload_file(melody_file, gcp_path)
             if url:
                 urls[f"melody_{filename}"] = url
+                
+        # Also check for melody files that might be in the base melody_results directory
+        base_melody_files = glob.glob(os.path.join(shared_dir, "melody_results", "*"))
+        for melody_file in base_melody_files:
+            # Only upload files, not directories
+            if os.path.isfile(melody_file):
+                filename = os.path.basename(melody_file)
+                gcp_path = f"{timestamp_folder}/melody/base_{filename}"
+                url = upload_file(melody_file, gcp_path)
+                if url:
+                    urls[f"melody_base_{filename}"] = url
         
-        # Upload vocal files
+        # Upload vocal files - including all files in the directory
         vocal_files = glob.glob(os.path.join(job_vocal_dir, "*"))
         for vocal_file in vocal_files:
             filename = os.path.basename(vocal_file)
-            gcp_path = f"job_{job_id}/vocal/{filename}"
+            gcp_path = f"{timestamp_folder}/vocal/{filename}"
             url = upload_file(vocal_file, gcp_path)
             if url:
                 urls[f"vocal_{filename}"] = url
+                
+        # Also check for vocal files that might be in the base vocal_results directory
+        base_vocal_files = glob.glob(os.path.join(shared_dir, "vocal_results", "*"))
+        for vocal_file in base_vocal_files:
+            # Only upload files, not directories
+            if os.path.isfile(vocal_file):
+                filename = os.path.basename(vocal_file)
+                gcp_path = f"{timestamp_folder}/vocal/base_{filename}"
+                url = upload_file(vocal_file, gcp_path)
+                if url:
+                    urls[f"vocal_base_{filename}"] = url
         
-        logger.info(f"Uploaded {len(urls)} files for job {job_id}")
+        logger.info(f"Uploaded {len(urls)} files for job {job_id} with timestamp {timestamp}")
         return urls
         
     except Exception as e:
@@ -153,7 +180,7 @@ def upload_job_files(job_id, shared_dir):
 
 def upload_job_results(job_id, input_file=None, melody_file=None, vocal_file=None, mixed_file=None):
     """
-    Upload specific job result files to GCP.
+    Upload specific job result files to GCP with timestamp in folder name.
     
     Args:
         job_id: The job ID
@@ -168,39 +195,68 @@ def upload_job_results(job_id, input_file=None, melody_file=None, vocal_file=Non
     urls = {}
     
     try:
+        # Generate timestamp for folder names
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp_folder = f"job_{job_id}_{timestamp}"
+        
         # Upload input file if provided
         if input_file and os.path.exists(input_file):
             filename = os.path.basename(input_file)
-            gcp_path = f"job_{job_id}/input/{filename}"
+            gcp_path = f"{timestamp_folder}/input/{filename}"
             url = upload_file(input_file, gcp_path)
             if url:
                 urls["input"] = url
         
-        # Upload melody file if provided
+        # Check for other files in the melody directory
         if melody_file and os.path.exists(melody_file):
-            filename = os.path.basename(melody_file)
-            gcp_path = f"job_{job_id}/melody/{filename}"
-            url = upload_file(melody_file, gcp_path)
-            if url:
-                urls["melody"] = url
+            # Get the directory containing the melody file
+            melody_dir = os.path.dirname(melody_file)
+            
+            # Upload all files in the melody directory
+            for file in glob.glob(os.path.join(melody_dir, "*")):
+                filename = os.path.basename(file)
+                gcp_path = f"{timestamp_folder}/melody/{filename}"
+                url = upload_file(file, gcp_path)
+                if url:
+                    if file == melody_file:
+                        urls["melody"] = url
+                    else:
+                        urls[f"melody_{filename}"] = url
         
-        # Upload vocal file if provided
+        # Check for other files in the vocal directory
+        vocal_dir = None
         if vocal_file and os.path.exists(vocal_file):
-            filename = os.path.basename(vocal_file)
-            gcp_path = f"job_{job_id}/vocal/{filename}"
-            url = upload_file(vocal_file, gcp_path)
-            if url:
-                urls["vocal"] = url
+            vocal_dir = os.path.dirname(vocal_file)
+            
+            # Upload all files in the vocal directory
+            for file in glob.glob(os.path.join(vocal_dir, "*")):
+                filename = os.path.basename(file)
+                gcp_path = f"{timestamp_folder}/vocal/{filename}"
+                url = upload_file(file, gcp_path)
+                if url:
+                    if file == vocal_file:
+                        urls["vocal"] = url
+                    elif file == mixed_file:
+                        urls["mixed"] = url
+                    else:
+                        urls[f"vocal_{filename}"] = url
         
-        # Upload mixed file if provided
-        if mixed_file and os.path.exists(mixed_file):
-            filename = os.path.basename(mixed_file)
-            gcp_path = f"job_{job_id}/vocal/{filename}"
-            url = upload_file(mixed_file, gcp_path)
-            if url:
-                urls["mixed"] = url
+        # If mixed_file is in a different directory than vocal_file
+        if mixed_file and os.path.exists(mixed_file) and (not vocal_dir or os.path.dirname(mixed_file) != vocal_dir):
+            mixed_dir = os.path.dirname(mixed_file)
+            
+            # Upload all files in the mixed directory
+            for file in glob.glob(os.path.join(mixed_dir, "*")):
+                filename = os.path.basename(file)
+                gcp_path = f"{timestamp_folder}/vocal/{filename}"
+                url = upload_file(file, gcp_path)
+                if url:
+                    if file == mixed_file:
+                        urls["mixed"] = url
+                    else:
+                        urls[f"mixed_{filename}"] = url
         
-        logger.info(f"Uploaded result files for job {job_id}")
+        logger.info(f"Uploaded result files for job {job_id} with timestamp {timestamp}")
         return urls
         
     except Exception as e:
@@ -220,7 +276,7 @@ def upload_job_files_to_gcp(job_id, vocal_path=None, mixed_path=None, midi_path=
     Returns:
         Dictionary with file types as keys and GCP URLs as values
     """
-    # This is just a wrapper around upload_job_results
+    # This is now a wrapper around upload_job_results with enhanced directory scanning
     return upload_job_results(job_id, 
                              input_file=None,  # We don't have input file here
                              melody_file=midi_path, 

@@ -1,3 +1,4 @@
+# models.py
 import os
 import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
@@ -12,12 +13,13 @@ Base = declarative_base()
 
 class Job(Base):
     __tablename__ = 'jobs'
+    
     id = Column(Integer, primary_key=True, index=True)
     status = Column(String, default="pending")
     input_file = Column(Text)
     output_file = Column(Text)
-    parameters = Column(Text)  # Added the missing parameters field
-    gcp_url = Column(Text)  # Added GCP URL field
+    parameters = Column(Text)  # Parameters field for storing job configuration
+    gcp_url = Column(Text)  # GCP URL field for storing public access URLs
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
