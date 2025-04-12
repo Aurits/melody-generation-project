@@ -230,37 +230,23 @@ def get_recent_jobs():
             margin-right: 6px;
             font-size: 1rem;
         }
-        .file-audio {
-            border-left: 3px solid #ec4899;
+        .files-container {
+            margin-top: 8px;
         }
-        .file-midi {
-            border-left: 3px solid #3b82f6;
-        }
-        .file-json {
-            border-left: 3px solid #f59e0b;
-        }
-        .file-beat {
-            border-left: 3px solid #10b981;
-        }
-        .file-vocal {
-            border-left: 3px solid #8b5cf6;
-        }
-        .file-mixed {
-            border-left: 3px solid #06b6d4;
-        }
-        .file-input {
-            border-left: 3px solid #84cc16;
-        }
-        .files-toggle {
+        .files-toggle-btn {
+            background-color: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 4px 10px;
             cursor: pointer;
-            color: #6b7280;
+            color: #4b5563;
             font-size: 0.9rem;
-            margin-top: 5px;
-            display: block;
-            user-select: none;
+            display: inline-flex;
+            align-items: center;
+            margin-bottom: 8px;
         }
-        .files-toggle:hover {
-            text-decoration: underline;
+        .files-toggle-btn:hover {
+            background-color: #e5e7eb;
         }
         .file-count {
             display: inline-block;
@@ -333,74 +319,44 @@ def get_recent_jobs():
                         except Exception as e:
                             logger.error(f"Fallback parsing also failed: {str(e)}")
             
-            # Create file listings HTML with improved labels
+            # Create file listings HTML without mapping - just showing raw filenames
             file_count = len(gcp_urls)
             files_html = ""
             
             if gcp_urls:
-                # Create a toggle button and a container for the files
+                # Create a better toggle button implementation
+                toggle_id = f"toggle-job-{job.id}-files"
+                container_id = f"job-{job.id}-files"
+                
                 files_html = f"""
-                <div class="files-toggle" onclick="toggleFiles('job-{job.id}-files')">
-                    Show/Hide Files <span class="file-count">{file_count}</span>
-                </div>
-                <div id="job-{job.id}-files" class="file-grid" style="display: none;">
+                <div class="files-container">
+                    <button id="{toggle_id}" class="files-toggle-btn" onclick="document.getElementById('{container_id}').style.display = document.getElementById('{container_id}').style.display === 'none' ? 'grid' : 'none';">
+                        Show/Hide Files <span class="file-count">{file_count}</span>
+                    </button>
+                    <div id="{container_id}" class="file-grid" style="display: none;">
                 """
                 
-                # Define mapping for human-friendly file labels
-                file_type_labels = {
-                    'vocal_': 'Vocal Track',
-                    'melody_': 'Melody',
-                    'mixed_': 'Mixed Track',
-                    'beat_': 'Beat Track',
-                    'input_': 'Input',
-                }
-                
-                # Loop through all files and create a grid of file links
+                # Loop through all files and create a grid of file links with just the raw filenames
                 for key, url in gcp_urls.items():
-                    # Determine file type and icon
-                    file_type_class = "file-audio"  # Default
-                    file_icon = "🔊"  # Default audio icon
+                    # Determine file type icon based on extension (simplified)
+                    file_icon = "📄"  # Default icon
                     
-                    # Extract the filename from the key
-                    filename = key.split('_', 1)[-1] if '_' in key else key
+                    # Get basic file extension
+                    if key.endswith('.mid'):
+                        file_icon = "🎹"  # MIDI
+                    elif key.endswith('.wav'):
+                        file_icon = "🔊"  # Audio
+                    elif key.endswith('.json'):
+                        file_icon = "📋"  # JSON
                     
-                    # Create a human-friendly label
-                    display_label = filename
-                    for prefix, label in file_type_labels.items():
-                        if key.startswith(prefix):
-                            # Create a cleaner display label
-                            base_name = filename.split('.')[-2] if '.' in filename else filename
-                            display_label = f"{label}"
-                            break
-                    
-                    # Determine file type based on key and filename
-                    if key.endswith('.mid') or 'melody_' in key and not key.endswith('.wav'):
-                        file_type_class = "file-midi"
-                        file_icon = "🎹"
-                    elif key.endswith('.json') or 'json' in key:
-                        file_type_class = "file-json"
-                        file_icon = "📄"
-                    elif 'beat' in key:
-                        file_type_class = "file-beat"
-                        file_icon = "🥁"
-                    elif 'vocal' in key:
-                        file_type_class = "file-vocal"
-                        file_icon = "🎤"
-                    elif 'mixed' in key or 'mix' in key:
-                        file_type_class = "file-mixed"
-                        file_icon = "🎵"
-                    elif 'input' in key:
-                        file_type_class = "file-input"
-                        file_icon = "📁"
-                    
-                    # Create a link for this file with improved label
+                    # Just use the filename as is - no mapping
                     files_html += f"""
-                    <a href="{url}" target="_blank" class="file-item {file_type_class}" title="{filename}">
-                        <span class="file-icon">{file_icon}</span> {display_label}
+                    <a href="{url}" target="_blank" class="file-item" title="{key}">
+                        <span class="file-icon">{file_icon}</span> {key}
                     </a>
                     """
                 
-                files_html += "</div>"
+                files_html += "</div></div>"
             else:
                 files_html = "No files available"
             
@@ -417,16 +373,6 @@ def get_recent_jobs():
         table_html += """
             </tbody>
         </table>
-        <script>
-        function toggleFiles(id) {
-            var files = document.getElementById(id);
-            if (files.style.display === "none") {
-                files.style.display = "grid";
-            } else {
-                files.style.display = "none";
-            }
-        }
-        </script>
         """
         
         return table_html

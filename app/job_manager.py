@@ -64,15 +64,6 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
         
-        # Store the beat mix file path in the job parameters if available
-        if beat_mix_file and os.path.exists(beat_mix_file):
-            # Add beat_mix_file to job parameters
-            if job.parameters:
-                job.parameters += f",beat_mix_file={beat_mix_file}"
-            else:
-                job.parameters = f"beat_mix_file={beat_mix_file}"
-            logger.info(f"Added beat mix file to job parameters: {beat_mix_file}")
-        
         # Try to upload files to GCP using the enhanced method
         try:
             # Upload ALL files from job-specific directories using the upload_job_files function
