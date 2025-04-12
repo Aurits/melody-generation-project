@@ -309,22 +309,31 @@ def get_recent_jobs():
             
             # Format parameters for display (excluding the gcp_urls_json parameter)
             parameters = job.parameters.replace(",", ", ") if job.parameters else "None"
-            if "gcp_urls_json=" in parameters:
-                # Remove the gcp_urls_json parameter from the displayed parameters
-                parameters = ", ".join([p for p in parameters.split(", ") if not p.startswith("gcp_urls_json=")])
             
-            # Extract GCP URLs from job parameters
+            # Extract GCP URLs from dedicated JSON column
             gcp_urls = {}
-            if job.parameters and "gcp_urls_json=" in job.parameters:
+            if job.gcp_urls_json:
                 try:
-                    # Extract the JSON string from the parameters
-                    params = dict(param.split('=', 1) for param in job.parameters.split(','))
-                    if 'gcp_urls_json' in params:
-                        gcp_urls = json.loads(params['gcp_urls_json'])
+                    gcp_urls = json.loads(job.gcp_urls_json)
                 except Exception as e:
                     logger.error(f"Error parsing GCP URLs JSON: {str(e)}")
+                    
+                    # Fallback: If we have a parameter with gcp_urls_json
+                    if job.parameters and "gcp_urls_json=" in job.parameters:
+                        try:
+                            # Extract the JSON string from the parameters - this is legacy support
+                            params_dict = {}
+                            for param in job.parameters.split(','):
+                                if '=' in param:
+                                    key, value = param.split('=', 1)
+                                    params_dict[key] = value
+                                    
+                            if 'gcp_urls_json' in params_dict:
+                                gcp_urls = json.loads(params_dict['gcp_urls_json'])
+                        except Exception as e:
+                            logger.error(f"Fallback parsing also failed: {str(e)}")
             
-            # Create file listings HTML
+            # Create file listings HTML with improved labels
             file_count = len(gcp_urls)
             files_html = ""
             
@@ -337,6 +346,15 @@ def get_recent_jobs():
                 <div id="job-{job.id}-files" class="file-grid" style="display: none;">
                 """
                 
+                # Define mapping for human-friendly file labels
+                file_type_labels = {
+                    'vocal_': 'Vocal Track',
+                    'melody_': 'Melody',
+                    'mixed_': 'Mixed Track',
+                    'beat_': 'Beat Track',
+                    'input_': 'Input',
+                }
+                
                 # Loop through all files and create a grid of file links
                 for key, url in gcp_urls.items():
                     # Determine file type and icon
@@ -345,6 +363,15 @@ def get_recent_jobs():
                     
                     # Extract the filename from the key
                     filename = key.split('_', 1)[-1] if '_' in key else key
+                    
+                    # Create a human-friendly label
+                    display_label = filename
+                    for prefix, label in file_type_labels.items():
+                        if key.startswith(prefix):
+                            # Create a cleaner display label
+                            base_name = filename.split('.')[-2] if '.' in filename else filename
+                            display_label = f"{label}"
+                            break
                     
                     # Determine file type based on key and filename
                     if key.endswith('.mid') or 'melody_' in key and not key.endswith('.wav'):
@@ -366,10 +393,10 @@ def get_recent_jobs():
                         file_type_class = "file-input"
                         file_icon = "📁"
                     
-                    # Create a link for this file
+                    # Create a link for this file with improved label
                     files_html += f"""
                     <a href="{url}" target="_blank" class="file-item {file_type_class}" title="{filename}">
-                        <span class="file-icon">{file_icon}</span> {filename}
+                        <span class="file-icon">{file_icon}</span> {display_label}
                     </a>
                     """
                 
@@ -405,7 +432,7 @@ def get_recent_jobs():
         return table_html
     finally:
         session.close()
-    
+
 # Function to get current job status
 def get_current_job_status():
     """Get the status of the current job if one exists"""

@@ -64,14 +64,14 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
         
-        # # Store the beat mix file path in the job parameters if available
-        # if beat_mix_file and os.path.exists(beat_mix_file):
-        #     # Add beat_mix_file to job parameters
-        #     if job.parameters:
-        #         job.parameters += f",beat_mix_file={beat_mix_file}"
-        #     else:
-        #         job.parameters = f"beat_mix_file={beat_mix_file}"
-        #     logger.info(f"Added beat mix file to job parameters: {beat_mix_file}")
+        # Store the beat mix file path in the job parameters if available
+        if beat_mix_file and os.path.exists(beat_mix_file):
+            # Add beat_mix_file to job parameters
+            if job.parameters:
+                job.parameters += f",beat_mix_file={beat_mix_file}"
+            else:
+                job.parameters = f"beat_mix_file={beat_mix_file}"
+            logger.info(f"Added beat mix file to job parameters: {beat_mix_file}")
         
         # Try to upload files to GCP using the enhanced method
         try:
@@ -79,17 +79,11 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             # This will include timestamps in folder names and scan all files in the directories
             gcp_urls = upload_job_files(job_id, shared_dir)
             
-            # Store all GCP URLs in a JSON format in the job record
+            # Store all GCP URLs in the dedicated JSON column
             if gcp_urls:
-                # Convert the URLs dictionary to a JSON string
-                gcp_urls_json = json.dumps(gcp_urls)
-                
-                # Store the JSON string in the job parameters
-                if job.parameters:
-                    job.parameters += f",gcp_urls_json={gcp_urls_json}"
-                else:
-                    job.parameters = f"gcp_urls_json={gcp_urls_json}"
-                logger.info(f"Stored all GCP URLs in job parameters as JSON")
+                # Store the JSON directly in the dedicated column
+                job.gcp_urls_json = json.dumps(gcp_urls)
+                logger.info(f"Stored all GCP URLs in dedicated JSON column")
                 
                 # Also store the mixed track URL in the gcp_url field for backward compatibility
                 if any(k for k in gcp_urls.keys() if 'mixed' in k):
@@ -116,7 +110,7 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         session.commit()
     finally:
         session.close()
-        
+
 def job_worker(checkpoint, gen_seed, shared_dir):
     """
     Background worker that continuously checks for pending jobs.
