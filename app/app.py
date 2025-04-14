@@ -11,6 +11,7 @@ from sqlalchemy import desc
 import datetime
 import shutil
 import uuid
+import json
 
 # -------------------- 
 # Configure Logging
@@ -163,7 +164,7 @@ def poll_job_status(job_id, progress=None):
 # Recent Jobs Function
 # -------------------- 
 def get_recent_jobs():
-    """Get a list of recent jobs for display in a table format"""
+    """Get a list of recent jobs for display in a table format with detailed file listings"""
     global current_job_id
     
     session = SessionLocal()
@@ -173,7 +174,7 @@ def get_recent_jobs():
         if not jobs:
             return "No recent jobs"
         
-        # Create a table header
+        # Create a table header with clean styling and toggle switch
         table_html = """
         <style>
         .job-table {
@@ -202,6 +203,84 @@ def get_recent_jobs():
         .status-pending {
             color: #6b7280;
         }
+        .file-list {
+            max-height: 120px;
+            overflow-y: auto;
+            margin-top: 5px;
+            border: 0px solid #ddd;
+            border-radius: 5px;
+            padding: 4px;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-bottom: 1px solid #eee;
+            text-decoration: none;
+            color: #4b5563;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        .file-item:hover {
+            color: #2563eb;
+        }
+        .file-icon {
+            margin-right: 6px;
+            font-size: 1rem;
+        }
+        
+        /* Toggle switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 24px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #2563eb;
+        }
+        input:checked + .slider:before {
+            transform: translateX(36px);
+        }
+        .toggle-label {
+            display: inline-flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .toggle-text {
+            margin-right: 10px;
+        }
         </style>
         <table class="job-table">
             <thead>
@@ -210,7 +289,7 @@ def get_recent_jobs():
                     <th>Status</th>
                     <th>Processing Time</th>
                     <th>Parameters</th>
-                    <th>Input File</th>
+                    <th>Files</th>
                 </tr>
             </thead>
             <tbody>
@@ -242,8 +321,71 @@ def get_recent_jobs():
             # Format parameters for display
             parameters = job.parameters.replace(",", ", ") if job.parameters else "None"
             
-            # Get input file name (not full path)
-            input_file = os.path.basename(job.input_file) if job.input_file else "None"
+            # Extract GCP URLs from dedicated JSON column
+            gcp_urls = {}
+            if job.gcp_urls_json:
+                try:
+                    gcp_urls = json.loads(job.gcp_urls_json)
+                except Exception as e:
+                    logger.error(f"Error parsing GCP URLs JSON: {str(e)}")
+                    
+                    # Fallback: If we have a parameter with gcp_urls_json
+                    if job.parameters and "gcp_urls_json=" in job.parameters:
+                        try:
+                            # Extract the JSON string from the parameters - this is legacy support
+                            params_dict = {}
+                            for param in job.parameters.split(','):
+                                if '=' in param:
+                                    key, value = param.split('=', 1)
+                                    params_dict[key] = value
+                                    
+                            if 'gcp_urls_json' in params_dict:
+                                gcp_urls = json.loads(params_dict['gcp_urls_json'])
+                        except Exception as e:
+                            logger.error(f"Fallback parsing also failed: {str(e)}")
+            
+            # Create file listings HTML with toggle switch
+            file_count = len(gcp_urls)
+            files_html = ""
+            
+            if gcp_urls:
+                toggle_id = f"toggle-job-{job.id}-files"
+                container_id = f"job-{job.id}-files"
+                
+                files_html = f"""
+                <div class="toggle-label">
+                    <span class="toggle-text">Show/Hide Files</span>
+                    <label class="switch">
+                        <input type="checkbox" id="{toggle_id}" onchange="document.getElementById('{container_id}').style.display = this.checked ? 'block' : 'none';">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div id="{container_id}" class="file-list" style="display: none;">
+                """
+                
+                # Loop through all files and create a vertical list with just filenames
+                for key, url in gcp_urls.items():
+                    # Determine file type icon based on extension
+                    file_icon = "📄"  # Default icon
+                    
+                    # Get basic file extension
+                    if ".mid" in key:
+                        file_icon = "🎹"  # MIDI
+                    elif ".wav" in key:
+                        file_icon = "🔊"  # Audio
+                    elif ".json" in key:
+                        file_icon = "📋"  # JSON
+                    
+                    # Just use the filename as is - no mapping
+                    files_html += f"""
+                    <a href="{url}" target="_blank" class="file-item" title="{key}">
+                        <span class="file-icon">{file_icon}</span> {key}
+                    </a>
+                    """
+                
+                files_html += "</div>"
+            else:
+                files_html = "No files available"
             
             table_html += f"""
             <tr class="{row_class}">
@@ -251,7 +393,7 @@ def get_recent_jobs():
                 <td class="{status_class}">{status_emoji} {job.status}</td>
                 <td>{duration_display}</td>
                 <td>{parameters}</td>
-                <td>{input_file}</td>
+                <td>{files_html}</td>
             </tr>
             """
         
@@ -264,6 +406,7 @@ def get_recent_jobs():
     finally:
         session.close()
 
+        
 # Function to get current job status
 def get_current_job_status():
     """Get the status of the current job if one exists"""
@@ -305,13 +448,13 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
     
     if file is None:
         logger.warning("Job submission attempted with no file")
-        return "⚠️ Please upload a backing track first", None, None, None, get_recent_jobs(), get_current_job_status()
+        return "⚠️ Please upload a backing track first", None, None, None, None, get_recent_jobs(), get_current_job_status()
     
     # Validate inputs
     if start_time > 0 and (not bpm or bpm <= 0):
         error = "If start_time is greater than 0, BPM must also be greater than 0."
         logger.warning(error)
-        return error, None, None, None, get_recent_jobs(), get_current_job_status()
+        return error, None, None, None, None, get_recent_jobs(), get_current_job_status()
     
     try:
         progress(0, "Initializing...")
@@ -389,7 +532,6 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
         progress(0.3, f"Job submitted (ID: {job_id}). Waiting for processing...")
         output_file, status = poll_job_status(job_id, progress)
 
-
         # Process the results
         if status == "completed":
             # Generate a unique ID for this generation
@@ -407,11 +549,13 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             vocal_filename = f"vocal_melody_{input_filename_base}_seed{seed}_{unique_id}.wav"
             mixed_filename = f"mixed_audio_{input_filename_base}_seed{seed}_{unique_id}.wav"
             midi_filename = f"melody_{input_filename_base}_seed{seed}_{unique_id}.mid"
+            beat_mix_filename = f"beat_mix_{input_filename_base}_seed{seed}_{unique_id}.wav"
             
             # Define paths in job-specific directories
             vocal_path = os.path.join(job_vocal_dir, vocal_filename)
             mixed_path = os.path.join(job_vocal_dir, mixed_filename)
             midi_path = os.path.join(job_melody_dir, midi_filename)
+            beat_mix_path = os.path.join(job_melody_dir, beat_mix_filename)
             
             # Get the original output paths
             output_dir = os.path.dirname(output_file)
@@ -426,11 +570,26 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                 os.path.join(output_dir, "melody.mid")
             ]
             
+            # Check multiple possible locations for the beat mix file
+            possible_beat_mix_paths = [
+                os.path.join(SHARED_DIR, "melody_results", "beat_mixed_synth_mix.wav"),
+                os.path.join(job_melody_dir, "beat_mixed_synth_mix.wav"),
+                os.path.join(SHARED_DIR, "melody_results", f"job_{job_id}", "beat_mixed_synth_mix.wav"),
+                os.path.join(output_dir, "beat_mixed_synth_mix.wav")
+            ]
+            
             midi_file_path = None
             for path in possible_midi_paths:
                 if os.path.exists(path):
                     midi_file_path = path
                     logger.info(f"Found MIDI file at: {midi_file_path}")
+                    break
+            
+            beat_mix_file_path = None
+            for path in possible_beat_mix_paths:
+                if os.path.exists(path):
+                    beat_mix_file_path = path
+                    logger.info(f"Found beat mix file at: {beat_mix_file_path}")
                     break
             
             # Copy files to job-specific directories if they exist
@@ -457,9 +616,16 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             else:
                 logger.warning("MIDI file not found in any of the expected locations")
             
+            if beat_mix_file_path and os.path.exists(beat_mix_file_path):
+                shutil.copy2(beat_mix_file_path, beat_mix_path)
+                logger.info(f"Copied beat mix file to {beat_mix_path}")
+                files_copied.append("beat_mix")
+            else:
+                logger.warning("Beat mix file not found in any of the expected locations")
+            
             # Make sure the audio files are readable by the current user
             try:
-                for path in [vocal_path, mixed_path, midi_path]:
+                for path in [vocal_path, mixed_path, midi_path, beat_mix_path]:
                     if os.path.exists(path):
                         os.chmod(path, 0o644)
             except Exception as e:
@@ -469,6 +635,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             session = SessionLocal()
             job = session.query(Job).filter(Job.id == job_id).first()
             job.output_file = mixed_path if os.path.exists(mixed_path) else output_file
+            #  
             session.commit()
             session.close()
             
@@ -485,6 +652,8 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                     logger.info(f"Returning mixed path: {mixed_path}")
                 if "midi" in files_copied:
                     logger.info(f"Returning MIDI path: {midi_path}")
+                if "beat_mix" in files_copied:
+                    logger.info(f"Returning beat mix path: {beat_mix_path}")
                 
                 # Update recent jobs display and current job status
                 recent_jobs_html = get_recent_jobs()
@@ -495,20 +664,20 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                     success_message, 
                     vocal_path if "vocal" in files_copied else None, 
                     mixed_path if "mixed" in files_copied else None, 
-                    midi_path if "midi" in files_copied else None, 
+                    midi_path if "midi" in files_copied else None,
+                    beat_mix_path if "beat_mix" in files_copied else None,  # Add beat mix file
                     recent_jobs_html, 
                     current_job_status
                 )
             else:
                 error_message = f"⚠️ Job completed but essential files are missing (Job ID: {job_id})"
-                return error_message, None, None, None, get_recent_jobs(), get_current_job_status()
+                return error_message, None, None, None, None, get_recent_jobs(), get_current_job_status()
 
     except Exception as e:
         logger.error(f"Error generating melodies: {str(e)}", exc_info=True)
-        return f"❌ Error: {str(e)}", None, None, None, get_recent_jobs(), get_current_job_status()
+        return f"❌ Error: {str(e)}", None, None, None, None, get_recent_jobs(), get_current_job_status()
 
-
-
+# Function to randomize the seed value
 def randomize_seed_value():
     import random
     new_seed = random.randint(0, 10000)
@@ -610,6 +779,16 @@ with gr.Blocks(title="Melody Generator") as demo:
                         autoplay=True,
                         show_download_button=True,
                     )
+
+                    gr.Markdown("#### Beat Estimation Mix")
+                    beat_mix_preview = gr.Audio(
+                        label="Beat Estimation Mix (WAV)",
+                        type="filepath",
+                        value=None, 
+                        interactive=False,
+                        autoplay=False,
+                        show_download_button=True,
+                    )
                     
                     gr.Markdown("#### MIDI File")
                     midi_preview = gr.File(
@@ -663,6 +842,7 @@ with gr.Blocks(title="Melody Generator") as demo:
             vocal_preview, 
             mixed_preview, 
             midi_preview,
+            beat_mix_preview, 
             recent_jobs_list,
             current_job_status
         ]
