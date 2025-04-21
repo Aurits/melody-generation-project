@@ -1,6 +1,6 @@
 # AI Melody & Vocal Generation Project
 
-This repository provides an end-to-end platform for generating AI-driven melodies from background tracks, then combining them with synthesized vocals for a complete musical composition. The project unifies separate model repositories – **tmik_bgm_conditional_melody_generation** for melody generation (GETMusic-based) and **tmik_make_vocal_mix** for vocal mixing (Dreamtonics-based) – under one “mother” repository, with clear steps for setup, usage, and management.
+This repository provides an end-to-end platform for generating AI-driven melodies from background tracks, then combining them with synthesized vocals for a complete musical composition. The project unifies separate model repositories – **tmik_bgm_conditional_melody_generation** for melody generation (GETMusic-based) and **tmik_make_vocal_mix** for vocal mixing (Dreamtonics-based) – under one "mother" repository, with clear steps for setup, usage, and management.
 
 ---
 
@@ -11,19 +11,20 @@ This repository provides an end-to-end platform for generating AI-driven melodie
 3. [Key Components](#key-components)  
 4. [Setup on Google Cloud VM](#setup-on-google-cloud-vm)  
 5. [Running the Project](#running-the-project)  
-6. [Usage Workflow](#usage-workflow)  
-7. [Database & Persistence](#database--persistence)  
-8. [Managing Models & Large Files](#managing-models--large-files)  
-9. [Project Maintenance](#project-maintenance)  
-10. [Contributing](#contributing)  
-11. [License](#license)
+6. [Auto-Starting After Reboot](#auto-starting-after-reboot)  
+7. [Usage Workflow](#usage-workflow)  
+8. [Database & Persistence](#database--persistence)  
+9. [Managing Models & Large Files](#managing-models--large-files)  
+10. [Project Maintenance](#project-maintenance)  
+11. [Contributing](#contributing)  
+12. [License](#license)
 
 ---
 
 ## 1. Overview
 
 - **Melody Generation:** Uses GETMusic to analyze a background track (WAV/MP3/MID) and produce a `.mid` file representing the new melody. By default, the model generates ~32 bars, so if your track is longer, the final output is truncated.
-- **Vocal Mixing:** Takes the generated melody and the original background track, synthesizes vocal lines, and produces a final `.wav` mix. Additional user inputs (like lyrics or “all_la” singing) can be incorporated via command-line flags.
+- **Vocal Mixing:** Takes the generated melody and the original background track, synthesizes vocal lines, and produces a final `.wav` mix. Additional user inputs (like lyrics or "all_la" singing) can be incorporated via command-line flags.
 - **Integrated Application:** Provides a user interface (Gradio) for uploading, job submission, status tracking, and downloading results. Persists job data in PostgreSQL.
 
 ---
@@ -111,22 +112,49 @@ project-root/
 
 ---
 
-## 6. Usage Workflow
+## 6. Auto-Starting After Reboot
+
+To ensure containers start properly after system reboot with GPU availability:
+
+1. **Set Up Crontab for Auto-Starting After Reboot**  
+   You can use your user's crontab to automatically run the startup script after reboot:
+
+   ```bash
+   crontab -e
+   ```
+
+   Then add this line:
+
+   ```
+   @reboot cd ~/melody-generation-project && ./start-services.sh >> ./cron-startup.log 2>&1
+   ```
+
+2. **Manual Usage**  
+   You can also run the script manually whenever needed:
+
+   ```bash
+   cd ~/melody-generation-project
+   ./start-services.sh
+   ```
+
+---
+
+## 7. Usage Workflow
 
 1. **Upload a Background Track**  
    - Through the Gradio UI or an API endpoint (if you have one), place your `.wav` or `.mp3` file in `/shared_data/input/`.
 2. **Create a Job**  
-   - The app stores a record in Postgres with status = “pending”.
+   - The app stores a record in Postgres with status = "pending".
 3. **Melody Generation**  
    - The job manager triggers `tmik_bgm_conditional_melody_generation` container, which produces `melody.mid` in `/shared_data/melody_results/`.
 4. **Vocal Mixing**  
    - After melody generation, the job manager calls the mixing container (tmik_make_vocal_mix) with the original BGM + `.mid` file, generating a final `mix.wav`.
 5. **Track Status & Download**  
-   - The job status changes to “completed” once the final mix is done. Users can download files from `/shared_data/vocal_results/` or the UI.
+   - The job status changes to "completed" once the final mix is done. Users can download files from `/shared_data/vocal_results/` or the UI.
 
 ---
 
-## 7. Database & Persistence
+## 8. Database & Persistence
 
 - **Database**  
   - Default: PostgreSQL (in Docker container).  
@@ -139,7 +167,7 @@ project-root/
 
 ---
 
-## 8. Managing Models & Large Files
+## 9. Managing Models & Large Files
 
 - **Submodules**  
   If `tmik_bgm_conditional_melody_generation` and `tmik_make_vocal_mix` are submodules, update them independently as needed.
@@ -150,7 +178,7 @@ project-root/
 
 ---
 
-## 9. Project Maintenance
+## 10. Project Maintenance
 
 - **README Updates**:  
   Keep environment setup, usage instructions, and known issues updated.  
@@ -164,7 +192,7 @@ project-root/
 
 ---
 
-## 10. Contributing
+## 11. Contributing
 
 1. **Fork** the repo and create feature branches.  
 2. **Pull Requests** should include a clear summary, relevant tests, and updated docs when changing behavior.  
@@ -172,7 +200,7 @@ project-root/
 
 ---
 
-## 11. License
+## 12. License
 
 - This project uses third-party AI libraries and may contain code under special research or commercial licenses (GETMusic, Dreamtonics).  
 - Ensure you have permission to use these models in your environment.
