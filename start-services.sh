@@ -16,7 +16,7 @@ log_message "Starting melody generation services..."
 # Remove shared_data directory if it exists
 if [ -d "./shared_data" ]; then
     log_message "Removing shared_data directory..."
-    rm -rf "./shared_data"
+    sudo rm -rf "./shared_data"
     log_message "shared_data directory removed successfully."
 else
     log_message "No shared_data directory found to remove."
