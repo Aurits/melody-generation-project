@@ -366,7 +366,7 @@ def mix_vocals_with_package(original_bgm, melody_file, output_dir, sex="female")
     except Exception as e:
         logger.error(f"Error mixing vocals with package: {str(e)}", exc_info=True)
         raise
-   
+
 def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0, model_set="set1", sex="female"):
     """
     Orchestrates the complete workflow:
@@ -404,33 +404,38 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
             melody_gen_installed = importlib.util.find_spec("melody_generation") is not None
             vocalmix_installed = importlib.util.find_spec("vocalmix") is not None
             
-            if not melody_gen_installed or not vocalmix_installed:
-                logger.warning(f"Required packages for model_set='set2' are not installed. "
-                              f"melody_generation: {'installed' if melody_gen_installed else 'NOT INSTALLED'}, "
-                              f"vocalmix: {'installed' if vocalmix_installed else 'NOT INSTALLED'}. "
-                              f"Falling back to model_set='set1'.")
-                model_set = 'set1'
-                
-                # Update output directories to use set1
-                if job_id:
-                    melody_output_dir = os.path.join(shared_dir, "melody_results_set1", f"job_{job_id}")
-                    vocal_output_dir = os.path.join(shared_dir, "vocal_results_set1", f"job_{job_id}")
-                else:
-                    melody_output_dir = os.path.join(shared_dir, "melody_results_set1")
-                    vocal_output_dir = os.path.join(shared_dir, "vocal_results_set1")
-                
-                # Create directories if they don't exist after changing model_set
-                os.makedirs(melody_output_dir, exist_ok=True)
-                os.makedirs(vocal_output_dir, exist_ok=True)
-            else:
+            # Check if required files exist
+            sdk_exists = os.path.exists("/app/dreamtonics_sdk")
+            
+            # Get the checkpoint path from environment variable if available
+            model_checkpoint_path = os.environ.get("MODEL_CHECKPOINT_PATH", "/app/checkpoints")
+            model_config_path = os.environ.get("MODEL_CONFIG_PATH", "/app/configs")
+            
+            checkpoint_exists = os.path.exists(model_checkpoint_path)
+            config_exists = os.path.exists(model_config_path)
+            
+            # Log the status of all requirements
+            logger.info(f"Model set 2 requirements check:")
+            logger.info(f"  - melody_generation package: {'installed' if melody_gen_installed else 'NOT INSTALLED'}")
+            logger.info(f"  - vocalmix package: {'installed' if vocalmix_installed else 'NOT INSTALLED'}")
+            logger.info(f"  - Dreamtonics SDK: {'exists' if sdk_exists else 'NOT FOUND'}")
+            logger.info(f"  - Model checkpoint: {'exists' if checkpoint_exists else 'NOT FOUND'} at {model_checkpoint_path}")
+            logger.info(f"  - Model config: {'exists' if config_exists else 'NOT FOUND'} at {model_config_path}")
+            
+            # Check if all requirements are met
+            if melody_gen_installed and vocalmix_installed and sdk_exists and checkpoint_exists and config_exists:
                 # Use Python packages for model set 2
+                logger.info(f"All requirements for model_set='set2' are met. Using Python packages.")
                 logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set} (Python packages)")
                 logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}")
+                
+                # Use the checkpoint path from environment variable
+                checkpoint_to_use = model_checkpoint_path
                 
                 # Generate melody using the Python package
                 melody_file = generate_melody_with_package(
                     input_bgm=input_bgm,
-                    checkpoint=checkpoint,
+                    checkpoint=checkpoint_to_use,
                     gen_seed=gen_seed,
                     output_dir=melody_output_dir,
                     start_time=start_time,
@@ -456,6 +461,35 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                 logger.info(f"Final mix generated successfully at: {final_mix}")
                 
                 return final_mix, beat_mix_file
+            else:
+                # Some requirements are not met, fall back to model set 1
+                missing_requirements = []
+                if not melody_gen_installed:
+                    missing_requirements.append("melody_generation package")
+                if not vocalmix_installed:
+                    missing_requirements.append("vocalmix package")
+                if not sdk_exists:
+                    missing_requirements.append("Dreamtonics SDK")
+                if not checkpoint_exists:
+                    missing_requirements.append("model checkpoint")
+                if not config_exists:
+                    missing_requirements.append("model config")
+                
+                logger.warning(f"Some requirements for model_set='set2' are not met: {', '.join(missing_requirements)}. "
+                              f"Falling back to model_set='set1'.")
+                model_set = 'set1'
+                
+                # Update output directories to use set1
+                if job_id:
+                    melody_output_dir = os.path.join(shared_dir, "melody_results_set1", f"job_{job_id}")
+                    vocal_output_dir = os.path.join(shared_dir, "vocal_results_set1", f"job_{job_id}")
+                else:
+                    melody_output_dir = os.path.join(shared_dir, "melody_results_set1")
+                    vocal_output_dir = os.path.join(shared_dir, "vocal_results_set1")
+                
+                # Create directories if they don't exist after changing model_set
+                os.makedirs(melody_output_dir, exist_ok=True)
+                os.makedirs(vocal_output_dir, exist_ok=True)
         
         # If model_set is 'set1' or we've fallen back to it
         melody_container = "melody-generation-set1"
