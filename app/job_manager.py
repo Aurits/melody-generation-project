@@ -1,4 +1,3 @@
-# job_manager.py
 import threading
 import time
 import datetime
@@ -38,6 +37,8 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         start_time = 0
         bpm = 0
         job_seed = gen_seed  # Default to global seed
+        model_set = "set1"   # Default to set1
+        sex = "female"       # Default to female voice
         
         if job.parameters:
             params = dict(param.split('=') for param in job.parameters.split(','))
@@ -48,6 +49,24 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             if 'seed' in params:
                 job_seed = int(float(params.get('seed', gen_seed)))
                 logger.info(f"Using job-specific seed: {job_seed}")
+                
+            # Extract model_set if available
+            if 'model_set' in params:
+                model_set = params.get('model_set', 'set1')
+                logger.info(f"Using model set: {model_set}")
+                
+            # Extract sex parameter if available
+            if 'sex' in params:
+                sex = params.get('sex', 'female')
+                logger.info(f"Using voice type: {sex}")
+        
+        # Store the model_set in the database
+        # Update the parameters to include model_set if it's not already there
+        if job.parameters and 'model_set=' not in job.parameters:
+            job.parameters += f",model_set={model_set}"
+        elif not job.parameters:
+            job.parameters = f"model_set={model_set}"
+        session.commit()
         
         # Check if the input file exists
         if not os.path.exists(job.input_file):
@@ -58,8 +77,18 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             return
             
         # Run the complete song processing (melody generation and vocal mix)
-        logger.info(f"Calling process_song with input file: {job.input_file}")
-        final_mix, beat_mix_file = process_song(shared_dir, job.input_file, checkpoint, job_seed, job_id, start_time, bpm)
+        logger.info(f"Calling process_song with input file: {job.input_file} and model_set: {model_set}")
+        final_mix, beat_mix_file = process_song(
+            shared_dir=shared_dir, 
+            input_bgm=job.input_file, 
+            checkpoint=checkpoint, 
+            gen_seed=job_seed, 
+            job_id=job_id, 
+            start_time=start_time, 
+            bpm=bpm,
+            model_set=model_set,
+            sex=sex
+        )
         
         logger.info(f"Processing complete. Output file: {final_mix}")
         job.output_file = final_mix
@@ -68,6 +97,7 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         try:
             # Upload ALL files from job-specific directories using the upload_job_files function
             # This will include timestamps in folder names and scan all files in the directories
+            # Removed model_set parameter as requested
             gcp_urls = upload_job_files(job_id, shared_dir)
             
             # Store all GCP URLs in the dedicated JSON column
@@ -108,15 +138,25 @@ def job_worker(checkpoint, gen_seed, shared_dir):
     """
     logger.info("Job worker started")
     
-    # Check if required containers are running
-    melody_container = "melody-generation"
-    vocal_container = "vocal-mix"
+    # Check if required containers for both model sets are running
+    melody_container_set1 = "melody-generation-set1"
+    vocal_container_set1 = "vocal-mix-set1"
+    melody_container_set2 = "melody-generation-set2"
+    vocal_container_set2 = "vocal-mix-set2"
     
-    if not check_container_running(melody_container):
-        logger.error(f"Required container '{melody_container}' is not running")
+    # Check set1 containers
+    if not check_container_running(melody_container_set1):
+        logger.error(f"Required container '{melody_container_set1}' is not running")
     
-    if not check_container_running(vocal_container):
-        logger.error(f"Required container '{vocal_container}' is not running")
+    if not check_container_running(vocal_container_set1):
+        logger.error(f"Required container '{vocal_container_set1}' is not running")
+    
+    # Check set2 containers
+    if not check_container_running(melody_container_set2):
+        logger.warning(f"Container '{melody_container_set2}' is not running. Set2 models will not be available.")
+    
+    if not check_container_running(vocal_container_set2):
+        logger.warning(f"Container '{vocal_container_set2}' is not running. Set2 models will not be available.")
     
     while True:
         try:

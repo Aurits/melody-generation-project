@@ -82,7 +82,7 @@ def run_command_in_container(container_name, command_list):
         logger.error(f"Unexpected error running command: {str(e)}", exc_info=True)
         raise
 
-def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, bpm=0):
+def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, bpm=0, container_name="melody-generation-set1"):
     """
     Triggers the melody generation model.
     - input_bgm: Path to the original background music file (in the shared volume)
@@ -91,10 +91,9 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, b
     - output_dir: The output directory for melody files
     - start_time: Song start time in seconds
     - bpm: Beats per minute
+    - container_name: Name of the container to use (default: "melody-generation-set1")
     Returns the path to the generated melody MIDI file.
     """
-    container_name = "melody-generation"
-    
     # Check if container is running
     if not check_container_running(container_name):
         raise RuntimeError(f"Required container '{container_name}' is not running")
@@ -147,16 +146,16 @@ def generate_melody(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, b
     
     raise FileNotFoundError(f"Melody file {melody_file} was not created after waiting")
 
-def mix_vocals(original_bgm, melody_file, output_dir):
+def mix_vocals(original_bgm, melody_file, output_dir, container_name="vocal-mix-set1", sex="female"):
     """
     Triggers the vocal mix model.
     - original_bgm: Path to the original BGM file (in the shared volume)
     - melody_file: Path to the generated melody MIDI file
     - output_dir: The output directory for vocal files
+    - container_name: Name of the container to use (default: "vocal-mix-set1")
+    - sex: Voice type to use ("female" or "male")
     Returns the path to the final mixed track.
     """
-    container_name = "vocal-mix"
-    
     # Check if container is running
     if not check_container_running(container_name):
         raise RuntimeError(f"Required container '{container_name}' is not running")
@@ -178,7 +177,7 @@ def mix_vocals(original_bgm, melody_file, output_dir):
         "--bgm_filepath", original_bgm,
         "--melody_filepath", melody_file,
         "--all_la",
-        "--sex", "female",
+        "--sex", sex,
         "--write_dirpath", output_dir
     ]
     
@@ -197,7 +196,7 @@ def mix_vocals(original_bgm, melody_file, output_dir):
     
     raise FileNotFoundError(f"Mix file {mix_file} was not created after waiting")
    
-def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0):
+def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0, model_set="set1", sex="female"):
     """
     Orchestrates the complete workflow:
       1. Runs melody generation.
@@ -212,25 +211,48 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         job_id: Optional job ID for organizing outputs
         start_time: Song start time in seconds
         bpm: Beats per minute
+        model_set: Which model set to use ('set1' or 'set2', defaults to 'set1')
+        sex: Voice type to use ("female" or "male")
     """
     try:
-        logger.info(f"Processing song: {input_bgm} for job {job_id}")
-        logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}")
+        # Determine which containers to use based on model_set
+        if model_set == 'set2':
+            melody_container = "melody-generation-set2"
+            vocal_container = "vocal-mix-set2"
+            model_suffix = "_set2"
+        else:
+            # Default to set1 container names
+            melody_container = "melody-generation-set1"
+            vocal_container = "vocal-mix-set1"
+            model_suffix = "_set1"
+            model_set = "set1"  # Ensure model_set is set1 for logging
+        
+        logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set}")
+        logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}")
+        logger.info(f"Using containers: {melody_container} and {vocal_container}")
         
         # Create job-specific output directories if job_id is provided
         if job_id:
-            melody_output_dir = os.path.join(shared_dir, "melody_results", f"job_{job_id}")
-            vocal_output_dir = os.path.join(shared_dir, "vocal_results", f"job_{job_id}")
+            melody_output_dir = os.path.join(shared_dir, f"melody_results{model_suffix}", f"job_{job_id}")
+            vocal_output_dir = os.path.join(shared_dir, f"vocal_results{model_suffix}", f"job_{job_id}")
         else:
-            melody_output_dir = os.path.join(shared_dir, "melody_results")
-            vocal_output_dir = os.path.join(shared_dir, "vocal_results")
+            melody_output_dir = os.path.join(shared_dir, f"melody_results{model_suffix}")
+            vocal_output_dir = os.path.join(shared_dir, f"vocal_results{model_suffix}")
             
         # Create directories if they don't exist
         os.makedirs(melody_output_dir, exist_ok=True)
         os.makedirs(vocal_output_dir, exist_ok=True)
         
-        # Generate melody
-        melody_file = generate_melody(input_bgm, checkpoint, gen_seed, melody_output_dir, start_time, bpm)
+        # Generate melody using the selected container
+        melody_file = generate_melody(
+            input_bgm=input_bgm,
+            checkpoint=checkpoint,
+            gen_seed=gen_seed,
+            output_dir=melody_output_dir,
+            start_time=start_time,
+            bpm=bpm,
+            container_name=melody_container
+        )
         logger.info(f"Melody file generated successfully at: {melody_file}")
         
         # Check for beat_mixed_synth_mix.wav file
@@ -241,8 +263,14 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
             logger.warning(f"Beat mix file not found at: {beat_mix_file}")
             beat_mix_file = None
         
-        # Mix vocals
-        final_mix = mix_vocals(input_bgm, melody_file, vocal_output_dir)
+        # Mix vocals using the selected container
+        final_mix = mix_vocals(
+            original_bgm=input_bgm,
+            melody_file=melody_file,
+            output_dir=vocal_output_dir,
+            container_name=vocal_container,
+            sex=sex
+        )
         logger.info(f"Final mix generated successfully at: {final_mix}")
         
         # Return both the final mix and beat mix file paths
