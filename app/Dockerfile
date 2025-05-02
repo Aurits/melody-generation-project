@@ -1,6 +1,14 @@
+# Dockerfile for the Melody Generation Project Integrated app
 FROM python:3.11-slim
 
 WORKDIR /app
+
+# Install system dependencies including Git and unzip
+RUN apt-get update && apt-get install -y \
+    git \
+    libomp5 \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
 COPY requirements.txt .
