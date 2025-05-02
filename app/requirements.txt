@@ -1,7 +1,13 @@
+# Core dependencies
 gradio==5.22.0
 sqlalchemy
 psycopg2-binary
 alembic
 google-cloud-storage
 
+# Melody generation package (for model set 2)
+--extra-index-url https://download.pytorch.org/whl/cu124
+git+ssh://git@github.com/satoshi-suehiro/tmik_melody_generation.git@prod
 
+# Vocal mixing package (for model set 2)
+git+ssh://git@github.com/satoshi-suehiro/tmik_vocalmix.git@prod

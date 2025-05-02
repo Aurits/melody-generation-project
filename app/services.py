@@ -400,76 +400,100 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         
         # Determine which approach to use based on model_set
         if model_set == 'set2':
-            # Use Python packages for model set 2
-            logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set} (Python packages)")
-            logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}")
+            # Check if required packages are installed
+            melody_gen_installed = importlib.util.find_spec("melody_generation") is not None
+            vocalmix_installed = importlib.util.find_spec("vocalmix") is not None
             
-            # Generate melody using the Python package
-            melody_file = generate_melody_with_package(
-                input_bgm=input_bgm,
-                checkpoint=checkpoint,
-                gen_seed=gen_seed,
-                output_dir=melody_output_dir,
-                start_time=start_time,
-                bpm=bpm
-            )
-            logger.info(f"Melody file generated successfully at: {melody_file}")
-            
-            # Check for beat_mixed_synth_mix.wav file
-            beat_mix_file = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
-            if os.path.exists(beat_mix_file):
-                logger.info(f"Beat mix file found at: {beat_mix_file}")
+            if not melody_gen_installed or not vocalmix_installed:
+                logger.warning(f"Required packages for model_set='set2' are not installed. "
+                              f"melody_generation: {'installed' if melody_gen_installed else 'NOT INSTALLED'}, "
+                              f"vocalmix: {'installed' if vocalmix_installed else 'NOT INSTALLED'}. "
+                              f"Falling back to model_set='set1'.")
+                model_set = 'set1'
+                
+                # Update output directories to use set1
+                if job_id:
+                    melody_output_dir = os.path.join(shared_dir, "melody_results_set1", f"job_{job_id}")
+                    vocal_output_dir = os.path.join(shared_dir, "vocal_results_set1", f"job_{job_id}")
+                else:
+                    melody_output_dir = os.path.join(shared_dir, "melody_results_set1")
+                    vocal_output_dir = os.path.join(shared_dir, "vocal_results_set1")
+                
+                # Create directories if they don't exist after changing model_set
+                os.makedirs(melody_output_dir, exist_ok=True)
+                os.makedirs(vocal_output_dir, exist_ok=True)
             else:
-                logger.warning(f"Beat mix file not found at: {beat_mix_file}")
-                beat_mix_file = None
-            
-            # Mix vocals using the Python package
-            final_mix = mix_vocals_with_package(
-                original_bgm=input_bgm,
-                melody_file=melody_file,
-                output_dir=vocal_output_dir,
-                sex=sex
-            )
-            logger.info(f"Final mix generated successfully at: {final_mix}")
-            
+                # Use Python packages for model set 2
+                logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set} (Python packages)")
+                logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}")
+                
+                # Generate melody using the Python package
+                melody_file = generate_melody_with_package(
+                    input_bgm=input_bgm,
+                    checkpoint=checkpoint,
+                    gen_seed=gen_seed,
+                    output_dir=melody_output_dir,
+                    start_time=start_time,
+                    bpm=bpm
+                )
+                logger.info(f"Melody file generated successfully at: {melody_file}")
+                
+                # Check for beat_mixed_synth_mix.wav file
+                beat_mix_file = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
+                if os.path.exists(beat_mix_file):
+                    logger.info(f"Beat mix file found at: {beat_mix_file}")
+                else:
+                    logger.warning(f"Beat mix file not found at: {beat_mix_file}")
+                    beat_mix_file = None
+                
+                # Mix vocals using the Python package
+                final_mix = mix_vocals_with_package(
+                    original_bgm=input_bgm,
+                    melody_file=melody_file,
+                    output_dir=vocal_output_dir,
+                    sex=sex
+                )
+                logger.info(f"Final mix generated successfully at: {final_mix}")
+                
+                return final_mix, beat_mix_file
+        
+        # If model_set is 'set1' or we've fallen back to it
+        melody_container = "melody-generation-set1"
+        vocal_container = "vocal-mix-set1"
+        
+        logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set} (Docker containers)")
+        logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}")
+        logger.info(f"Using containers: {melody_container} and {vocal_container}")
+        
+        # Generate melody using the selected container
+        melody_file = generate_melody(
+            input_bgm=input_bgm,
+            checkpoint=checkpoint,
+            gen_seed=gen_seed,
+            output_dir=melody_output_dir,
+            start_time=start_time,
+            bpm=bpm,
+            container_name=melody_container
+        )
+        logger.info(f"Melody file generated successfully at: {melody_file}")
+        
+        # Check for beat_mixed_synth_mix.wav file
+        beat_mix_file = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
+        if os.path.exists(beat_mix_file):
+            logger.info(f"Beat mix file found at: {beat_mix_file}")
         else:
-            # Use Docker containers for model set 1 (default)
-            melody_container = "melody-generation-set1"
-            vocal_container = "vocal-mix-set1"
-            
-            logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set} (Docker containers)")
-            logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}")
-            logger.info(f"Using containers: {melody_container} and {vocal_container}")
-            
-            # Generate melody using the selected container
-            melody_file = generate_melody(
-                input_bgm=input_bgm,
-                checkpoint=checkpoint,
-                gen_seed=gen_seed,
-                output_dir=melody_output_dir,
-                start_time=start_time,
-                bpm=bpm,
-                container_name=melody_container
-            )
-            logger.info(f"Melody file generated successfully at: {melody_file}")
-            
-            # Check for beat_mixed_synth_mix.wav file
-            beat_mix_file = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
-            if os.path.exists(beat_mix_file):
-                logger.info(f"Beat mix file found at: {beat_mix_file}")
-            else:
-                logger.warning(f"Beat mix file not found at: {beat_mix_file}")
-                beat_mix_file = None
-            
-            # Mix vocals using the selected container
-            final_mix = mix_vocals(
-                original_bgm=input_bgm,
-                melody_file=melody_file,
-                output_dir=vocal_output_dir,
-                container_name=vocal_container,
-                sex=sex
-            )
-            logger.info(f"Final mix generated successfully at: {final_mix}")
+            logger.warning(f"Beat mix file not found at: {beat_mix_file}")
+            beat_mix_file = None
+        
+        # Mix vocals using the selected container
+        final_mix = mix_vocals(
+            original_bgm=input_bgm,
+            melody_file=melody_file,
+            output_dir=vocal_output_dir,
+            container_name=vocal_container,
+            sex=sex
+        )
+        logger.info(f"Final mix generated successfully at: {final_mix}")
         
         # Return both the final mix and beat mix file paths
         return final_mix, beat_mix_file
