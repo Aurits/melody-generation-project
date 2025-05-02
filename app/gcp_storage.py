@@ -102,6 +102,7 @@ def upload_file(local_file_path, gcp_path):
 def upload_job_files(job_id, shared_dir):
     """
     Upload all files for a specific job to GCP with timestamp in folder name.
+    Handles model-specific directories (set1, set2).
     
     Args:
         job_id: The job ID
@@ -117,10 +118,33 @@ def upload_job_files(job_id, shared_dir):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         timestamp_folder = f"job_{job_id}_{timestamp}"
         
+        # Get model set from job parameters in database
+        model_set = "set1"  # Default
+        try:
+            from models import SessionLocal, Job
+            session = SessionLocal()
+            job = session.query(Job).filter(Job.id == job_id).first()
+            if job and job.parameters:
+                params = dict(param.split('=') for param in job.parameters.split(','))
+                if 'model_set' in params:
+                    model_set = params.get('model_set', 'set1')
+                    logger.info(f"Found model_set={model_set} in job parameters")
+            session.close()
+        except Exception as e:
+            logger.error(f"Error getting model_set from database: {str(e)}")
+        
+        # Define model suffix based on model_set
+        model_suffix = f"_{model_set}" if model_set != "" else ""
+        
         # Define job-specific directories
         job_input_dir = os.path.join(shared_dir, "input", f"job_{job_id}")
-        job_melody_dir = os.path.join(shared_dir, "melody_results", f"job_{job_id}")
-        job_vocal_dir = os.path.join(shared_dir, "vocal_results", f"job_{job_id}")
+        
+        # Use model-specific directories for melody and vocal results
+        job_melody_dir = os.path.join(shared_dir, f"melody_results{model_suffix}", f"job_{job_id}")
+        job_vocal_dir = os.path.join(shared_dir, f"vocal_results{model_suffix}", f"job_{job_id}")
+        
+        logger.info(f"Uploading files for job {job_id} with model_set={model_set}")
+        logger.info(f"Looking in directories: {job_input_dir}, {job_melody_dir}, {job_vocal_dir}")
         
         # Upload input files
         input_files = glob.glob(os.path.join(job_input_dir, "*"))
@@ -141,7 +165,8 @@ def upload_job_files(job_id, shared_dir):
                 urls[f"melody_{filename}"] = url
                 
         # Also check for melody files that might be in the base melody_results directory
-        base_melody_files = glob.glob(os.path.join(shared_dir, "melody_results", "*"))
+        base_melody_dir = os.path.join(shared_dir, f"melody_results{model_suffix}")
+        base_melody_files = glob.glob(os.path.join(base_melody_dir, "*"))
         for melody_file in base_melody_files:
             # Only upload files, not directories
             if os.path.isfile(melody_file):
@@ -161,7 +186,8 @@ def upload_job_files(job_id, shared_dir):
                 urls[f"vocal_{filename}"] = url
                 
         # Also check for vocal files that might be in the base vocal_results directory
-        base_vocal_files = glob.glob(os.path.join(shared_dir, "vocal_results", "*"))
+        base_vocal_dir = os.path.join(shared_dir, f"vocal_results{model_suffix}")
+        base_vocal_files = glob.glob(os.path.join(base_vocal_dir, "*"))
         for vocal_file in base_vocal_files:
             # Only upload files, not directories
             if os.path.isfile(vocal_file):
@@ -170,6 +196,36 @@ def upload_job_files(job_id, shared_dir):
                 url = upload_file(vocal_file, gcp_path)
                 if url:
                     urls[f"vocal_base_{filename}"] = url
+        
+        # Check if we found any files
+        if not urls:
+            logger.warning(f"No files found for job {job_id} with model_set={model_set}")
+            
+            # If no files were found with the model suffix, try without it (fallback)
+            if model_suffix:
+                logger.info(f"Trying fallback to directories without model suffix")
+                
+                # Try standard directories as fallback
+                job_melody_dir_fallback = os.path.join(shared_dir, "melody_results", f"job_{job_id}")
+                job_vocal_dir_fallback = os.path.join(shared_dir, "vocal_results", f"job_{job_id}")
+                
+                # Upload melody files from fallback directory
+                melody_files = glob.glob(os.path.join(job_melody_dir_fallback, "*"))
+                for melody_file in melody_files:
+                    filename = os.path.basename(melody_file)
+                    gcp_path = f"{timestamp_folder}/melody/{filename}"
+                    url = upload_file(melody_file, gcp_path)
+                    if url:
+                        urls[f"melody_{filename}"] = url
+                
+                # Upload vocal files from fallback directory
+                vocal_files = glob.glob(os.path.join(job_vocal_dir_fallback, "*"))
+                for vocal_file in vocal_files:
+                    filename = os.path.basename(vocal_file)
+                    gcp_path = f"{timestamp_folder}/vocal/{filename}"
+                    url = upload_file(vocal_file, gcp_path)
+                    if url:
+                        urls[f"vocal_{filename}"] = url
         
         logger.info(f"Uploaded {len(urls)} files for job {job_id} with timestamp {timestamp}")
         return urls
@@ -198,6 +254,21 @@ def upload_job_results(job_id, input_file=None, melody_file=None, vocal_file=Non
         # Generate timestamp for folder names
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         timestamp_folder = f"job_{job_id}_{timestamp}"
+        
+        # Get model set from job parameters in database
+        model_set = "set1"  # Default
+        try:
+            from models import SessionLocal, Job
+            session = SessionLocal()
+            job = session.query(Job).filter(Job.id == job_id).first()
+            if job and job.parameters:
+                params = dict(param.split('=') for param in job.parameters.split(','))
+                if 'model_set' in params:
+                    model_set = params.get('model_set', 'set1')
+                    logger.info(f"Found model_set={model_set} in job parameters")
+            session.close()
+        except Exception as e:
+            logger.error(f"Error getting model_set from database: {str(e)}")
         
         # Upload input file if provided
         if input_file and os.path.exists(input_file):
