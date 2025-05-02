@@ -71,55 +71,55 @@ services:
               capabilities: [gpu]
 
   # Model Set 2 Services
-  melody_generation_set2:
-    build:
-      context: ./model-set-2/tmik_melody_generation
-      dockerfile: Dockerfile
-    container_name: melody-generation-set2
-    restart: unless-stopped
-    environment:
-      - CHECKPOINT_PATH=/app/checkpoints/checkpoint.pth
-      - BGMPATH=/app/testdata/test.mid
-      - GEN_SEED=0
-      - MODEL_SET=set2
-    volumes:
-      - ./shared_data:/shared_data
-      - ./model-set-2/tmik_melody_generation:/app
-    command: ["tail", "-f", "/dev/null"]  # Keeps container running
-    depends_on:
-      - postgres
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+  # melody_generation_set2:
+  #   build:
+  #     context: ./model-set-2/tmik_melody_generation
+  #     dockerfile: Dockerfile
+  #   container_name: melody-generation-set2
+  #   restart: unless-stopped
+  #   environment:
+  #     - CHECKPOINT_PATH=/app/checkpoints/checkpoint.pth
+  #     - BGMPATH=/app/testdata/test.mid
+  #     - GEN_SEED=0
+  #     - MODEL_SET=set2
+  #   volumes:
+  #     - ./shared_data:/shared_data
+  #     - ./model-set-2/tmik_melody_generation:/app
+  #   command: ["tail", "-f", "/dev/null"]  # Keeps container running
+  #   depends_on:
+  #     - postgres
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
 
-  vocal_mix_set2:
-    build:
-      context: ./model-set-2/tmik_vocalmix
-      dockerfile: Dockerfile
-    container_name: vocal-mix-set2
-    restart: unless-stopped
-    environment:
-      - DREAMTONICS_SDK_PATH=/app/dreamtonics_sdk
-      - SEX=female
-      - MODEL_SET=set2
-    volumes:
-      - ./shared_data:/shared_data
-      - ./model-set-2/tmik_vocalmix:/app
-    command: ["tail", "-f", "/dev/null"]  # Keeps container running
-    depends_on:
-      - postgres
-      - melody_generation_set2
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+  # vocal_mix_set2:
+  #   build:
+  #     context: ./model-set-2/tmik_vocalmix
+  #     dockerfile: Dockerfile
+  #   container_name: vocal-mix-set2
+  #   restart: unless-stopped
+  #   environment:
+  #     - DREAMTONICS_SDK_PATH=/app/dreamtonics_sdk
+  #     - SEX=female
+  #     - MODEL_SET=set2
+  #   volumes:
+  #     - ./shared_data:/shared_data
+  #     - ./model-set-2/tmik_vocalmix:/app
+  #   command: ["tail", "-f", "/dev/null"]  # Keeps container running
+  #   depends_on:
+  #     - postgres
+  #     - melody_generation_set2
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
 
   integrated_app:
     build:
@@ -133,8 +133,8 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres-database:5432/mydb
       - MELODY_GEN_SET1_SERVICE=melody-generation-set1
       - VOCAL_MIX_SET1_SERVICE=vocal-mix-set1
-      - MELODY_GEN_SET2_SERVICE=melody-generation-set2
-      - VOCAL_MIX_SET2_SERVICE=vocal-mix-set2
+      # - MELODY_GEN_SET2_SERVICE=melody-generation-set2
+      # - VOCAL_MIX_SET2_SERVICE=vocal-mix-set2
     volumes:
       - ./shared_data:/shared_data
       - ./app:/app
@@ -144,8 +144,8 @@ services:
       - postgres
       - melody_generation_set1
       - vocal_mix_set1
-      - melody_generation_set2
-      - vocal_mix_set2
+      # - melody_generation_set2
+      # - vocal_mix_set2
 
 volumes:
   db-data:
