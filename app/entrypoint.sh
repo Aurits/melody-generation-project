@@ -11,6 +11,9 @@ alembic upgrade head
 # Initialize package installation status flags
 MELODY_GEN_INSTALLED=false
 VOCALMIX_INSTALLED=false
+SDK_INSTALLED=false
+CHECKPOINT_FILES_INSTALLED=false
+CONFIG_FILES_INSTALLED=false
 
 # Load GitHub PAT from .env file if it exists
 if [ -f "/app/.env" ]; then
@@ -21,6 +24,19 @@ if [ -f "/app/.env" ]; then
     if [ -n "$GITHUB_PAT" ]; then
         echo "GitHub PAT found in .env file, attempting to install packages using token authentication..."
         
+        # Check if gcc is installed, if not try to install it
+        if ! command -v gcc &> /dev/null; then
+            echo "gcc not found, attempting to install build tools..."
+            apt-get update && apt-get install -y build-essential
+            if [ $? -eq 0 ]; then
+                echo "Successfully installed build tools"
+            else
+                echo "Failed to install build tools, melody_generation package may not install correctly"
+            fi
+        else
+            echo "gcc is already installed"
+        fi
+        
         # Install melody_generation package with detailed error handling
         echo "Installing melody_generation package..."
         pip install --extra-index-url https://download.pytorch.org/whl/cu124 git+https://${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git@prod
@@ -29,8 +45,12 @@ if [ -f "/app/.env" ]; then
             MELODY_GEN_INSTALLED=true
         else
             echo "Failed to install melody_generation package with the first method, trying alternative method..."
-            # Try alternative installation method
-            pip install --extra-index-url https://download.pytorch.org/whl/cu124 git+https://${GITHUB_PAT}:${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git@prod
+            # Try alternative installation method - install madmom separately first
+            echo "Attempting to install madmom dependency separately..."
+            pip install git+https://github.com/CPJKU/madmom.git
+            
+            # Now try installing melody_generation again
+            pip install --extra-index-url https://download.pytorch.org/whl/cu124 git+https://${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git@prod
             if [ $? -eq 0 ]; then
                 echo "Successfully installed melody_generation package with alternative method"
                 MELODY_GEN_INSTALLED=true
@@ -133,7 +153,6 @@ pip install gdown
 
 # Try to download and set up the Dreamtonics SDK
 echo "Attempting to download and set up Dreamtonics SDK..."
-SDK_INSTALLED=false
 if [ ! -d "/app/dreamtonics_sdk" ]; then
     # Download the SDK
     echo "Downloading Dreamtonics SDK..."
@@ -169,9 +188,6 @@ mkdir -p /app/configs
 
 # Copy the checkpoint files from the local directory if they exist
 echo "Setting up checkpoint and configuration files..."
-CHECKPOINT_FILES_INSTALLED=false
-CONFIG_FILES_INSTALLED=false
-
 if [ -d "/app/model_files/checkpoints" ]; then
     echo "Copying checkpoint files from local directory..."
     cp -r /app/model_files/checkpoints/* /app/checkpoints/
