@@ -3,12 +3,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies including Git, build tools, and unzip
+# Install system dependencies including Git, build tools, fluidsynth, and unzip
 RUN apt-get update && apt-get install -y \
     git \
     libomp5 \
     unzip \
     build-essential \
+    fluidsynth \
+    libfluidsynth-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
