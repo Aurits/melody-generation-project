@@ -5,6 +5,8 @@ tmik_make_vocal_mix
 # shared data
 shared_data
 
+app/res
+
 app/checkpoints
 app/dreamtonics_sdk
 
