@@ -452,13 +452,28 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                     beat_mix_file = None
                 
                 # Mix vocals using the Python package
-                final_mix = mix_vocals_with_package(
-                    original_bgm=input_bgm,
-                    melody_file=melody_file,
-                    output_dir=vocal_output_dir,
-                    sex=sex
-                )
-                logger.info(f"Final mix generated successfully at: {final_mix}")
+                try:
+                    final_mix = mix_vocals_with_package(
+                        original_bgm=input_bgm,
+                        melody_file=melody_file,
+                        output_dir=vocal_output_dir,
+                        sex=sex
+                    )
+                    logger.info(f"Final mix generated successfully at: {final_mix}")
+                except Exception as e:
+                    logger.error(f"Error in vocal mixing: {str(e)}")
+                    logger.info("Falling back to model set 1 for vocal mixing")
+                    
+                    # Fall back to model set 1 for vocal mixing only
+                    vocal_container = "vocal-mix-set1"
+                    final_mix = mix_vocals(
+                        original_bgm=input_bgm,
+                        melody_file=melody_file,
+                        output_dir=vocal_output_dir,
+                        container_name=vocal_container,
+                        sex=sex
+                    )
+                    logger.info(f"Final mix generated successfully using fallback method at: {final_mix}")
                 
                 return final_mix, beat_mix_file
             else:
@@ -534,4 +549,5 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         
     except Exception as e:
         logger.error(f"Error in process_song: {str(e)}", exc_info=True)
-        raise
+        # Return default values for Gradio interface to avoid the "not enough output values" error
+        return None, None

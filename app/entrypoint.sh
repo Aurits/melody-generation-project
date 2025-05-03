@@ -180,6 +180,16 @@ if [ ! -d "/app/dreamtonics_sdk" ]; then
 else
     echo "Dreamtonics SDK directory already exists"
     SDK_INSTALLED=true
+    
+    # Set proper permissions for all executables in the SDK
+    echo "Setting permissions for Dreamtonics SDK executables..."
+    find /app/dreamtonics_sdk -type f -name "*.so" -exec chmod +x {} \;
+    find /app/dreamtonics_sdk -type f -name "example" -exec chmod +x {} \;
+    find /app/dreamtonics_sdk -type d -name "build" -exec chmod -R 755 {} \;
+    
+    # Also set permissions for any build directories that might be created by vocalmix
+    mkdir -p /app/build
+    chmod -R 755 /app/build
 fi
 
 # Create directories for checkpoints and configs
