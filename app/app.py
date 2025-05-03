@@ -717,6 +717,24 @@ with gr.Blocks(title="Melody Generator") as demo:
                     )
                     
                     with gr.Accordion("Advanced Settings", open=False):
+                        
+                        gr.Markdown("#### Model Selection")
+                        
+                        with gr.Row():
+                            model_set = gr.Radio(
+                                label="Model Set",
+                                choices=["set1", "set2"],
+                                value="set1",
+                                interactive=True
+                            )
+                            
+                            voice_type = gr.Radio(
+                                label="Voice Type",
+                                choices=["female", "male"],
+                                value="female",
+                                interactive=True
+                            )
+
                         gr.Markdown("#### Beat Estimation")
                         gr.Markdown(
                             "You can optionally provide a start time and BPM for better control. "
@@ -757,22 +775,7 @@ with gr.Blocks(title="Melody Generator") as demo:
                         randomize_btn = gr.Button("New Random Seed")
                         randomize_btn.click(fn=randomize_seed_value, outputs=seed)
                         
-                        gr.Markdown("#### Model Selection")
                         
-                        with gr.Row():
-                            model_set = gr.Radio(
-                                label="Model Set",
-                                choices=["set1", "set2"],
-                                value="set1",
-                                interactive=True
-                            )
-                            
-                            voice_type = gr.Radio(
-                                label="Voice Type",
-                                choices=["female", "male"],
-                                value="female",
-                                interactive=True
-                            )
                     
                     status_message = gr.Markdown("Upload a track and click Generate.")
                     generate_btn = gr.Button("Generate Melodies", variant="primary", size="lg")
