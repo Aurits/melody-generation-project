@@ -26,69 +26,34 @@ if [ -f "/app/.env" ]; then
         
         # Install melody_generation package
         echo "Installing melody_generation package..."
-        # Madmom should already be installed in the Dockerfile
-        echo "Verifying madmom installation..."
-        python -c "import madmom; print(f'madmom version: {madmom.__version__}')" 2>/dev/null
+        # Now install the melody_generation package with specific commit hash
+        echo "Installing melody_generation package from GitHub with commit 6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761..."
+        pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu124 git+https://${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git@6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761
         if [ $? -eq 0 ]; then
-            echo "madmom is properly installed"
-            
-            # Now install the melody_generation package with specific commit hash
-            echo "Installing melody_generation package from GitHub with commit 6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761..."
-            pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu124 git+https://${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git@6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761
-            if [ $? -eq 0 ]; then
-                echo "Successfully installed melody_generation package"
-                MELODY_GEN_INSTALLED=true
-            else
-                echo "Failed to install melody_generation package, trying alternative approach..."
-                # Clone the repository and install locally
-                mkdir -p /tmp/melody_gen_temp
-                git clone https://${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git /tmp/melody_gen_temp
-                if [ $? -eq 0 ]; then
-                    echo "Successfully cloned repository, checking out specific commit..."
-                    cd /tmp/melody_gen_temp
-                    git checkout 6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761
-                    echo "Installing from local clone with commit 6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761..."
-                    pip install -e .
-                    cd /app
-                    if [ $? -eq 0 ]; then
-                        echo "Successfully installed melody_generation from local clone"
-                        MELODY_GEN_INSTALLED=true
-                    else
-                        echo "Failed to install from local clone"
-                    fi
-                else
-                    echo "Failed to clone repository"
-                fi
-                rm -rf /tmp/melody_gen_temp
-            fi
+            echo "Successfully installed melody_generation package"
+            MELODY_GEN_INSTALLED=true
         else
-            echo "madmom is not properly installed - this should have been done in the Dockerfile"
-            echo "Attempting emergency installation of madmom..."
-            
-            # Try a simplified approach for madmom
-            pip install --no-cache-dir cython numpy==1.20.3 scipy==1.7.3
-            git clone --depth 1 https://github.com/CPJKU/madmom.git /tmp/madmom_emergency
-            cd /tmp/madmom_emergency
-            # Fix the problematic imports
-            sed -i 's/from numpy.math cimport INFINITY/from libc.float cimport INFINITY/g' madmom/features/beats_crf.pyx
-            sed -i 's/numpy.math/libc.float/g' madmom/ml/hmm.pyx
-            pip install -e .
-            cd /app
-            
+            echo "Failed to install melody_generation package, trying alternative approach..."
+            # Clone the repository and install locally
+            mkdir -p /tmp/melody_gen_temp
+            git clone https://${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git /tmp/melody_gen_temp
             if [ $? -eq 0 ]; then
-                echo "Emergency madmom installation succeeded, trying melody_generation again..."
-                pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu124 git+https://${GITHUB_PAT}@github.com/satoshi-suehiro/tmik_melody_generation.git@6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761
+                echo "Successfully cloned repository, checking out specific commit..."
+                cd /tmp/melody_gen_temp
+                git checkout 6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761
+                echo "Installing from local clone with commit 6ad2e777eee5c1e96a1419ad5d5b886c0a5bd761..."
+                pip install -e .
+                cd /app
                 if [ $? -eq 0 ]; then
-                    echo "Successfully installed melody_generation package after emergency madmom fix"
+                    echo "Successfully installed melody_generation from local clone"
                     MELODY_GEN_INSTALLED=true
                 else
-                    echo "Still failed to install melody_generation package"
+                    echo "Failed to install from local clone"
                 fi
             else
-                echo "Emergency madmom installation failed"
+                echo "Failed to clone repository"
             fi
-            
-            rm -rf /tmp/madmom_emergency
+            rm -rf /tmp/melody_gen_temp
         fi
         
         # Install vocalmix package
@@ -236,7 +201,7 @@ else
 fi
 
 # Default paths for checkpoint and config
-CHECKPOINT_PATH="/app/checkpoints/test2300_rvf_ln_270000.yaml"
+CHECKPOINT_PATH="/app/checkpoints/test2300_cqt_realTP_continuous_270000"
 CONFIG_PATH="/app/configs/default.yaml"
 
 # Find alternative paths if defaults don't exist
