@@ -235,7 +235,7 @@ def generate_melody_with_package(input_bgm, checkpoint, gen_seed, output_dir, st
         # Create the model
         gen_model = create_model(
             checkpoint_path=checkpoint_path,
-            config_path=pathlib.Path("configs/test2300_cqt_realTP_continuous_270000.yaml") 
+            config_path=pathlib.Path("configs/test2300_rvf_ln_270000.yaml") 
         )
         
         # Handle beat estimation

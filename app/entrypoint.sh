@@ -221,7 +221,7 @@ if [ -d "/app/model_files/checkpoints" ]; then
 else
     echo "Local checkpoint files not found, attempting to download..."
     # Try to download and set up configuration and checkpoint files
-    gdown --id 16g5ED0sLY12q73a5JRVigRcOJsXirV9I -O /tmp/config_checkpoint.zip
+    gdown --id 1CkBxeUm08jISvC0H3vdZkBLHhEBmop71 -O /tmp/config_checkpoint.zip
     if [ $? -eq 0 ]; then
         echo "Successfully downloaded configuration and checkpoint files"
         
