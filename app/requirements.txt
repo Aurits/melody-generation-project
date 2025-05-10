@@ -5,6 +5,17 @@ psycopg2-binary
 alembic
 google-cloud-storage
 gdown
-numpy==1.23.5
-cython==0.29.36
 
+# For ML processing
+torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu124
+# Note: madmom is installed separately in the Dockerfile
+librosa
+scikit-learn
+
+# Audio processing
+soundfile
+pydub
+matplotlib
+pandas
+mido
+pretty_midi

@@ -1,4 +1,3 @@
-# Dockerfile for the Melody Generation Project Integrated app
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -15,6 +14,20 @@ RUN apt-get update && apt-get install -y \
     libfluidsynth-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Set environment variables for numpy to ensure compatibility with madmom
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV NUMEXPR_NUM_THREADS=1
+ENV OMP_NUM_THREADS=1
+
+# Install specific numpy version before other requirements to resolve madmom dependency issue
+RUN pip install --no-cache-dir numpy==1.23.5 cython==0.29.36
+
+# Install older scipy version for compatibility with madmom
+RUN pip install --no-cache-dir scipy==1.10.1
+
+# Install madmom separately before other requirements
+RUN pip install --no-cache-dir git+https://github.com/CPJKU/madmom.git
 
 # Install dependencies
 COPY requirements.txt .
