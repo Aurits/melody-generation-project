@@ -9,12 +9,9 @@ RUN apt-get update && apt-get install -y \
     libomp5 \
     unzip \
     build-essential \
-    python3-dev \
-    libsndfile1-dev \
     fluidsynth \
     libfluidsynth-dev \
     && rm -rf /var/lib/apt/lists/*
-
 
 # Install dependencies
 COPY requirements.txt .

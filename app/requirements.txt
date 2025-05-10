@@ -1,21 +1,7 @@
-# Core application dependencies
+# Core dependencies
 gradio==5.22.0
 sqlalchemy
 psycopg2-binary
 alembic
 google-cloud-storage
 gdown
-
-
-# Audio processing
-librosa
-soundfile
-pydub
-matplotlib
-pandas
-mido
-pretty_midi
-
-# Other utilities
-scikit-learn
-tqdm
