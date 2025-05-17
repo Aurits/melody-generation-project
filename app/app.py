@@ -723,7 +723,7 @@ with gr.Blocks(title="Melody Generator") as demo:
                         with gr.Row():
                             model_set = gr.Radio(
                                 label="Model Set",
-                                choices=["set1", "set2"],
+                                choices=[("Old", "set1"), ("New", "set2")],
                                 value="set1",
                                 interactive=True
                             )
