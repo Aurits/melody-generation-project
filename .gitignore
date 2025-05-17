@@ -5,6 +5,13 @@ tmik_make_vocal_mix
 # shared data
 shared_data
 
+app/res/*
+
+app/res
+
+app/checkpoints
+app/dreamtonics_sdk
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -102,3 +109,5 @@ dmypy.json
 .idea/
 
 app/access.json
+app/res/fuwarare.json
+app/res/fuwarare.json

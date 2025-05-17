@@ -443,7 +443,7 @@ def get_current_job_status():
 # -------------------- 
 # Gradio UI Functions
 # -------------------- 
-def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progress()):
+def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_type, progress=gr.Progress()):
     global current_job_id
     
     if file is None:
@@ -469,13 +469,13 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
         session = SessionLocal()
         job = Job(
             status="pending",
-            parameters=f"start_time={start_time},bpm={bpm},seed={seed}"
+            parameters=f"start_time={start_time},bpm={bpm},seed={seed},model_set={model_set},sex={voice_type}"
         )
         session.add(job)
         session.commit()
         job_id = job.id
         current_job_id = job_id  # Set the global current job ID
-        logger.info(f"Created job {job_id}")
+        logger.info(f"Created job {job_id} with model_set={model_set} and voice_type={voice_type}")
         
         # Create job-specific directories
         job_input_dir, job_melody_dir, job_vocal_dir = create_job_directories(job_id)
@@ -551,11 +551,14 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             midi_filename = f"melody_{input_filename_base}_seed{seed}_{unique_id}.mid"
             beat_mix_filename = f"beat_mix_{input_filename_base}_seed{seed}_{unique_id}.wav"
             
+            # Add model set suffix to directories
+            model_suffix = f"_{model_set}"
+            
             # Define paths in job-specific directories
-            vocal_path = os.path.join(job_vocal_dir, vocal_filename)
-            mixed_path = os.path.join(job_vocal_dir, mixed_filename)
-            midi_path = os.path.join(job_melody_dir, midi_filename)
-            beat_mix_path = os.path.join(job_melody_dir, beat_mix_filename)
+            vocal_path = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", vocal_filename)
+            mixed_path = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", mixed_filename)
+            midi_path = os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", midi_filename)
+            beat_mix_path = os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", beat_mix_filename)
             
             # Get the original output paths
             output_dir = os.path.dirname(output_file)
@@ -564,17 +567,15 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             
             # Check multiple possible locations for the MIDI file
             possible_midi_paths = [
-                os.path.join(SHARED_DIR, "melody_results", "melody.mid"),
-                os.path.join(job_melody_dir, "melody.mid"),
-                os.path.join(SHARED_DIR, "melody_results", f"job_{job_id}", "melody.mid"),
+                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", "melody.mid"),
+                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", "melody.mid"),
                 os.path.join(output_dir, "melody.mid")
             ]
             
             # Check multiple possible locations for the beat mix file
             possible_beat_mix_paths = [
-                os.path.join(SHARED_DIR, "melody_results", "beat_mixed_synth_mix.wav"),
-                os.path.join(job_melody_dir, "beat_mixed_synth_mix.wav"),
-                os.path.join(SHARED_DIR, "melody_results", f"job_{job_id}", "beat_mixed_synth_mix.wav"),
+                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", "beat_mixed_synth_mix.wav"),
+                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", "beat_mixed_synth_mix.wav"),
                 os.path.join(output_dir, "beat_mixed_synth_mix.wav")
             ]
             
@@ -596,6 +597,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             files_copied = []
             
             if os.path.exists(vocal_melody_path):
+                os.makedirs(os.path.dirname(vocal_path), exist_ok=True)
                 shutil.copy2(vocal_melody_path, vocal_path)
                 logger.info(f"Copied vocal file to {vocal_path}")
                 files_copied.append("vocal")
@@ -603,6 +605,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                 logger.warning(f"Vocal file not found at {vocal_melody_path}")
             
             if os.path.exists(mixed_track_path):
+                os.makedirs(os.path.dirname(mixed_path), exist_ok=True)
                 shutil.copy2(mixed_track_path, mixed_path)
                 logger.info(f"Copied mixed file to {mixed_path}")
                 files_copied.append("mixed")
@@ -610,6 +613,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                 logger.warning(f"Mixed file not found at {mixed_track_path}")
             
             if midi_file_path and os.path.exists(midi_file_path):
+                os.makedirs(os.path.dirname(midi_path), exist_ok=True)
                 shutil.copy2(midi_file_path, midi_path)
                 logger.info(f"Copied MIDI file to {midi_path}")
                 files_copied.append("midi")
@@ -617,6 +621,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
                 logger.warning("MIDI file not found in any of the expected locations")
             
             if beat_mix_file_path and os.path.exists(beat_mix_file_path):
+                os.makedirs(os.path.dirname(beat_mix_path), exist_ok=True)
                 shutil.copy2(beat_mix_file_path, beat_mix_path)
                 logger.info(f"Copied beat mix file to {beat_mix_path}")
                 files_copied.append("beat_mix")
@@ -635,7 +640,6 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             session = SessionLocal()
             job = session.query(Job).filter(Job.id == job_id).first()
             job.output_file = mixed_path if os.path.exists(mixed_path) else output_file
-            #  
             session.commit()
             session.close()
             
@@ -643,7 +647,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, progress=gr.Progr
             
             # Consider the job successful if at least the mixed track is available
             if "mixed" in files_copied:
-                success_message = f"✅ Generation complete! (Job ID: {job_id})"
+                success_message = f"✅ Generation complete! (Job ID: {job_id}, Model: {model_set}, Voice: {voice_type})"
                 
                 # Log the paths being returned to the UI
                 if "vocal" in files_copied:
@@ -713,6 +717,24 @@ with gr.Blocks(title="Melody Generator") as demo:
                     )
                     
                     with gr.Accordion("Advanced Settings", open=False):
+                        
+                        gr.Markdown("#### Model Selection")
+                        
+                        with gr.Row():
+                            model_set = gr.Radio(
+                                label="Model Set",
+                                choices=["set1", "set2"],
+                                value="set1",
+                                interactive=True
+                            )
+                            
+                            voice_type = gr.Radio(
+                                label="Voice Type",
+                                choices=["female", "male"],
+                                value="female",
+                                interactive=True
+                            )
+
                         gr.Markdown("#### Beat Estimation")
                         gr.Markdown(
                             "You can optionally provide a start time and BPM for better control. "
@@ -752,6 +774,8 @@ with gr.Blocks(title="Melody Generator") as demo:
                         
                         randomize_btn = gr.Button("New Random Seed")
                         randomize_btn.click(fn=randomize_seed_value, outputs=seed)
+                        
+                        
                     
                     status_message = gr.Markdown("Upload a track and click Generate.")
                     generate_btn = gr.Button("Generate Melodies", variant="primary", size="lg")
@@ -817,11 +841,13 @@ with gr.Blocks(title="Melody Generator") as demo:
             
             1. Upload a backing track (WAV file)
             2. Optionally adjust settings like start time, BPM, and seed
-            3. Click "Generate Melodies"
-            4. The system will process your track and generate:
+            3. Select a model set and voice type in the Advanced Settings
+            4. Click "Generate Melodies"
+            5. The system will process your track and generate:
                - A vocal melody track
                - A mixed track (vocals + backing)
                - A MIDI file of the melody
+               - A beat estimation mix
             
             ### Technical Details:
             
@@ -830,13 +856,17 @@ with gr.Blocks(title="Melody Generator") as demo:
             - Vocal synthesis model converts the melody to vocals
             - Audio mixing combines the vocals with your backing track
             
+            Two model sets are available:
+            - Set 1: Default model set
+            - Set 2: Alternative model set with different characteristics
+            
             Jobs are processed in the background and results are available when processing completes.
             """)
     
     # Connect the generate button to the process function
     generate_btn.click(
         fn=process_audio,
-        inputs=[file_input, start_time, bpm, seed, randomize_seed],
+        inputs=[file_input, start_time, bpm, seed, randomize_seed, model_set, voice_type],
         outputs=[
             status_message, 
             vocal_preview, 
@@ -862,7 +892,11 @@ if __name__ == "__main__":
                 SHARED_DIR,
                 os.path.join(SHARED_DIR, "input"),
                 os.path.join(SHARED_DIR, "melody_results"),
-                os.path.join(SHARED_DIR, "vocal_results")
+                os.path.join(SHARED_DIR, "vocal_results"),
+                os.path.join(SHARED_DIR, "melody_results_set1"),
+                os.path.join(SHARED_DIR, "vocal_results_set1"),
+                os.path.join(SHARED_DIR, "melody_results_set2"),
+                os.path.join(SHARED_DIR, "vocal_results_set2")
             ],
             prevent_thread_lock=True  # Add this to prevent UI freezing
         )
