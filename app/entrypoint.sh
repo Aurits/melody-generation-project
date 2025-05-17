@@ -221,7 +221,8 @@ if [ -d "/app/model_files/checkpoints" ]; then
 else
     echo "Local checkpoint files not found, attempting to download..."
     # Try to download and set up configuration and checkpoint files
-    gdown --id 1CkBxeUm08jISvC0H3vdZkBLHhEBmop71 -O /tmp/config_checkpoint.zip
+    gdown --id 1l1AB8f7oQL17vXwMwPGlMfzHpox7jiYC -O /tmp/config_checkpoint.zip
+    
     if [ $? -eq 0 ]; then
         echo "Successfully downloaded configuration and checkpoint files"
         
@@ -285,7 +286,7 @@ else
 fi
 
 # Define the checkpoint path based on the directory structure we saw in the image
-CHECKPOINT_PATH="/app/checkpoints/test2300_cqt_realTP_continuous_270000"
+CHECKPOINT_PATH="/app/configs/20250507_test2300_270000.yaml"
 CONFIG_PATH="/app/configs/default.yaml"
 
 # If the specific checkpoint directory doesn't exist, try to find any checkpoint directory

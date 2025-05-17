@@ -546,10 +546,11 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
             input_filename_base, input_ext = os.path.splitext(original_filename)
             
             # Define output filenames with the requested format
-            vocal_filename = f"vocal_melody_{input_filename_base}_seed{seed}_{unique_id}.wav"
-            mixed_filename = f"mixed_audio_{input_filename_base}_seed{seed}_{unique_id}.wav"
-            midi_filename = f"melody_{input_filename_base}_seed{seed}_{unique_id}.mid"
-            beat_mix_filename = f"beat_mix_{input_filename_base}_seed{seed}_{unique_id}.wav"
+            model_display_name = "old" if model_set == "set1" else "new"
+            vocal_filename = f"vocal_melody_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
+            mixed_filename = f"mixed_audio_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
+            midi_filename = f"melody_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.mid"
+            beat_mix_filename = f"beat_mix_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
             
             # Add model set suffix to directories
             model_suffix = f"_{model_set}"
@@ -723,7 +724,7 @@ with gr.Blocks(title="Melody Generator") as demo:
                         with gr.Row():
                             model_set = gr.Radio(
                                 label="Model Set",
-                                choices=["set1", "set2"],
+                                choices=[("Old", "set1"), ("New", "set2")],
                                 value="set1",
                                 interactive=True
                             )
