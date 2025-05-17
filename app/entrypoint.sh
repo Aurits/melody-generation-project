@@ -196,91 +196,171 @@ fi
 mkdir -p /app/checkpoints
 mkdir -p /app/configs
 
-# Copy the checkpoint files from the local directory if they exist
-echo "Setting up checkpoint and configuration files..."
-if [ -d "/app/model_files/checkpoints" ]; then
-    echo "Copying checkpoint files from local directory..."
-    cp -r /app/model_files/checkpoints/* /app/checkpoints/
-    if [ $? -eq 0 ]; then
-        echo "Successfully copied checkpoint files"
-        CHECKPOINT_FILES_INSTALLED=true
-    else
-        echo "Failed to copy checkpoint files"
+# Define GitHub URL for the specific checkpoint
+GITHUB_CHECKPOINT_URL="https://github.com/satoshi-suehiro/tmik_melody_generation/releases/download/v0.1.0/20250507_test2300_270000.zip"
+GITHUB_CHECKPOINT_FILE="/tmp/github_checkpoint.zip"
+
+# First, try to download the specific checkpoint from GitHub
+echo "Attempting to download checkpoint from GitHub release..."
+# Install curl if needed
+if ! command -v curl &> /dev/null; then
+    echo "curl not found, installing..."
+    apt-get update && apt-get install -y curl
+fi
+
+curl -L -o "$GITHUB_CHECKPOINT_FILE" "$GITHUB_CHECKPOINT_URL"
+if [ $? -eq 0 ] && [ -f "$GITHUB_CHECKPOINT_FILE" ]; then
+    echo "Successfully downloaded checkpoint from GitHub release"
+    
+    # Extract the files
+    echo "Extracting checkpoint files from GitHub release..."
+    mkdir -p /tmp/github_checkpoint
+    unzip -q "$GITHUB_CHECKPOINT_FILE" -d /tmp/github_checkpoint
+    
+    # List the contents to debug
+    echo "Contents of extracted GitHub archive:"
+    find /tmp/github_checkpoint -type f | sort
+    
+    # Based on the file structure from the images:
+    # 1. The YAML config file is at the top level
+    # 2. The model files are in a subdirectory with the same name as the zip
+    
+    # Copy the YAML file to configs directory
+    YAML_FILES=$(find /tmp/github_checkpoint -maxdepth 1 -name "*.yaml" -o -name "*.yml")
+    if [ -n "$YAML_FILES" ]; then
+        echo "Found YAML file at top level of archive"
+        cp $YAML_FILES /app/configs/
+        # Rename to default.yaml if needed
+        for file in $YAML_FILES; do
+            basename=$(basename "$file")
+            cp "$file" "/app/configs/default.yaml"
+            echo "Copied $basename to /app/configs/default.yaml"
+        done
+        CONFIG_FILES_INSTALLED=true
     fi
     
-    # Copy config files if they exist
-    if [ -d "/app/model_files/configs" ]; then
-        cp -r /app/model_files/configs/* /app/configs/
-        if [ $? -eq 0 ]; then
-            echo "Successfully copied config files"
-            CONFIG_FILES_INSTALLED=true
-        else
-            echo "Failed to copy config files"
+    # Look for the model files directory
+    MODEL_DIR=$(find /tmp/github_checkpoint -type d -name "20250507_test2300_270000")
+    if [ -n "$MODEL_DIR" ]; then
+        echo "Found model directory: $MODEL_DIR"
+        # Create the target directory
+        mkdir -p /app/checkpoints/test2300_cqt_realTP_continuous_270000
+        
+        # Copy all model files (.pt, .pth, .json, etc.)
+        find "$MODEL_DIR" -type f \( -name "*.pt" -o -name "*.pth" -o -name "*.json" -o -name "*.bin" -o -name "*.safetensors" \) | while read file; do
+            echo "Copying model file: $(basename "$file")"
+            cp "$file" /app/checkpoints/test2300_cqt_realTP_continuous_270000/
+        done
+        CHECKPOINT_FILES_INSTALLED=true
+    else
+        echo "Model directory not found, looking for model files directly"
+        # Look for model files directly
+        MODEL_FILES=$(find /tmp/github_checkpoint -type f \( -name "*.pt" -o -name "*.pth" -o -name "*.json" -o -name "*.bin" -o -name "*.safetensors" \))
+        if [ -n "$MODEL_FILES" ]; then
+            mkdir -p /app/checkpoints/test2300_cqt_realTP_continuous_270000
+            for file in $MODEL_FILES; do
+                echo "Copying model file: $(basename "$file")"
+                cp "$file" /app/checkpoints/test2300_cqt_realTP_continuous_270000/
+            done
+            CHECKPOINT_FILES_INSTALLED=true
         fi
     fi
+    
+    # Clean up
+    rm -rf /tmp/github_checkpoint
+    rm "$GITHUB_CHECKPOINT_FILE"
 else
-    echo "Local checkpoint files not found, attempting to download..."
-    # Try to download and set up configuration and checkpoint files
-    gdown --id 1CkBxeUm08jISvC0H3vdZkBLHhEBmop71 -O /tmp/config_checkpoint.zip
-    if [ $? -eq 0 ]; then
-        echo "Successfully downloaded configuration and checkpoint files"
+    echo "Failed to download checkpoint from GitHub release, trying alternative methods..."
+fi
+
+# Try the local directory if GitHub download failed and files aren't installed yet
+if [ "$CHECKPOINT_FILES_INSTALLED" = false ] || [ "$CONFIG_FILES_INSTALLED" = false ]; then
+    # Copy the checkpoint files from the local directory if they exist
+    echo "Trying to set up checkpoint and configuration files from local directory..."
+    if [ -d "/app/model_files/checkpoints" ]; then
+        echo "Copying checkpoint files from local directory..."
+        cp -r /app/model_files/checkpoints/* /app/checkpoints/
+        if [ $? -eq 0 ]; then
+            echo "Successfully copied checkpoint files from local directory"
+            CHECKPOINT_FILES_INSTALLED=true
+        else
+            echo "Failed to copy checkpoint files from local directory"
+        fi
         
-        # Extract the files if download was successful
-        if [ -f "/tmp/config_checkpoint.zip" ]; then
-            echo "Extracting configuration and checkpoint files..."
-            mkdir -p /tmp/config_checkpoint
-            unzip -q /tmp/config_checkpoint.zip -d /tmp/config_checkpoint
-            
-            # List the contents to debug
-            echo "Contents of extracted archive:"
-            find /tmp/config_checkpoint -type f | sort
-            
-            # Try different possible directory structures
-            if [ -d "/tmp/config_checkpoint/checkpoints" ]; then
-                echo "Found /tmp/config_checkpoint/checkpoints directory"
-                cp -r /tmp/config_checkpoint/checkpoints/* /app/checkpoints/
-                CHECKPOINT_FILES_INSTALLED=true
-            elif [ -d "/tmp/config_checkpoint/checkpoint" ]; then
-                echo "Found /tmp/config_checkpoint/checkpoint directory"
-                cp -r /tmp/config_checkpoint/checkpoint/* /app/checkpoints/
-                CHECKPOINT_FILES_INSTALLED=true
-            else
-                # Try to find directories that might contain checkpoint files
-                echo "Searching for checkpoint directories..."
-                find /tmp/config_checkpoint -name "*.pth" -o -name "*.pt" -o -name "*.json" -o -name "*.yaml" | while read file; do
-                    dir=$(dirname "$file")
-                    if [ -d "$dir" ] && [[ "$dir" == *"checkpoint"* || "$dir" == *"model"* ]]; then
-                        echo "Found potential checkpoint directory: $dir"
-                        cp -r "$dir"/* /app/checkpoints/
-                        CHECKPOINT_FILES_INSTALLED=true
-                    fi
-                done
-            fi
-            
-            if [ -d "/tmp/config_checkpoint/configs" ]; then
-                echo "Found /tmp/config_checkpoint/configs directory"
-                cp -r /tmp/config_checkpoint/configs/* /app/configs/
-                CONFIG_FILES_INSTALLED=true
-            elif [ -d "/tmp/config_checkpoint/config" ]; then
-                echo "Found /tmp/config_checkpoint/config directory"
-                cp -r /tmp/config_checkpoint/config/* /app/configs/
+        # Copy config files if they exist
+        if [ -d "/app/model_files/configs" ]; then
+            cp -r /app/model_files/configs/* /app/configs/
+            if [ $? -eq 0 ]; then
+                echo "Successfully copied config files from local directory"
                 CONFIG_FILES_INSTALLED=true
             else
-                # Try to find YAML files that might be config files
-                echo "Searching for config files..."
-                find /tmp/config_checkpoint -name "*.yaml" | while read file; do
-                    echo "Found potential config file: $file"
-                    cp "$file" /app/configs/
-                    CONFIG_FILES_INSTALLED=true
-                done
+                echo "Failed to copy config files from local directory"
             fi
-            
-            # Clean up
-            rm -rf /tmp/config_checkpoint
-            rm /tmp/config_checkpoint.zip
         fi
     else
-        echo "Failed to download configuration and checkpoint files"
+        echo "Local checkpoint files not found, attempting to download from Google Drive..."
+        # Try to download and set up configuration and checkpoint files from Google Drive
+        gdown --id 1CkBxeUm08jISvC0H3vdZkBLHhEBmop71 -O /tmp/config_checkpoint.zip
+        if [ $? -eq 0 ]; then
+            echo "Successfully downloaded configuration and checkpoint files from Google Drive"
+            
+            # Extract the files if download was successful
+            if [ -f "/tmp/config_checkpoint.zip" ]; then
+                echo "Extracting configuration and checkpoint files..."
+                mkdir -p /tmp/config_checkpoint
+                unzip -q /tmp/config_checkpoint.zip -d /tmp/config_checkpoint
+                
+                # List the contents to debug
+                echo "Contents of extracted archive:"
+                find /tmp/config_checkpoint -type f | sort
+                
+                # Try different possible directory structures
+                if [ -d "/tmp/config_checkpoint/checkpoints" ]; then
+                    echo "Found /tmp/config_checkpoint/checkpoints directory"
+                    cp -r /tmp/config_checkpoint/checkpoints/* /app/checkpoints/
+                    CHECKPOINT_FILES_INSTALLED=true
+                elif [ -d "/tmp/config_checkpoint/checkpoint" ]; then
+                    echo "Found /tmp/config_checkpoint/checkpoint directory"
+                    cp -r /tmp/config_checkpoint/checkpoint/* /app/checkpoints/
+                    CHECKPOINT_FILES_INSTALLED=true
+                else
+                    # Try to find directories that might contain checkpoint files
+                    echo "Searching for checkpoint directories..."
+                    find /tmp/config_checkpoint -name "*.pth" -o -name "*.pt" -o -name "*.json" -o -name "*.yaml" | while read file; do
+                        dir=$(dirname "$file")
+                        if [ -d "$dir" ] && [[ "$dir" == *"checkpoint"* || "$dir" == *"model"* ]]; then
+                            echo "Found potential checkpoint directory: $dir"
+                            cp -r "$dir"/* /app/checkpoints/
+                            CHECKPOINT_FILES_INSTALLED=true
+                        fi
+                    done
+                fi
+                
+                if [ -d "/tmp/config_checkpoint/configs" ]; then
+                    echo "Found /tmp/config_checkpoint/configs directory"
+                    cp -r /tmp/config_checkpoint/configs/* /app/configs/
+                    CONFIG_FILES_INSTALLED=true
+                elif [ -d "/tmp/config_checkpoint/config" ]; then
+                    echo "Found /tmp/config_checkpoint/config directory"
+                    cp -r /tmp/config_checkpoint/config/* /app/configs/
+                    CONFIG_FILES_INSTALLED=true
+                else
+                    # Try to find YAML files that might be config files
+                    echo "Searching for config files..."
+                    find /tmp/config_checkpoint -name "*.yaml" | while read file; do
+                        echo "Found potential config file: $file"
+                        cp "$file" /app/configs/
+                        CONFIG_FILES_INSTALLED=true
+                    done
+                fi
+                
+                # Clean up
+                rm -rf /tmp/config_checkpoint
+                rm /tmp/config_checkpoint.zip
+            fi
+        else
+            echo "Failed to download configuration and checkpoint files from Google Drive"
+        fi
     fi
 fi
 
