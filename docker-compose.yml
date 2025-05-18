@@ -146,6 +146,13 @@ services:
       - vocal_mix_set1
       # - melody_generation_set2
       # - vocal_mix_set2
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   db-data:
