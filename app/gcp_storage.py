@@ -1,6 +1,4 @@
 # gcp_storage.py
-# Enhanced module for uploading melody generation files to Google Cloud Storage with timestamps
-
 import os
 import json
 import logging
