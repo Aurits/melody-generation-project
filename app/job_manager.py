@@ -1,3 +1,4 @@
+# job_manager.py
 import threading
 import time
 import datetime
@@ -39,9 +40,10 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         job_seed = gen_seed  # Default to global seed
         model_set = "set1"   # Default to set1
         sex = "female"       # Default to female voice
+        batch_size = 1       # Default to single track
         
         if job.parameters:
-            params = dict(param.split('=') for param in job.parameters.split(','))
+            params = dict(param.split('=') for param in job.parameters.split(',') if '=' in param)
             start_time = float(params.get('start_time', 0))
             bpm = int(float(params.get('bpm', 0)))
             
@@ -59,14 +61,11 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             if 'sex' in params:
                 sex = params.get('sex', 'female')
                 logger.info(f"Using voice type: {sex}")
-        
-        # Store the model_set in the database
-        # Update the parameters to include model_set if it's not already there
-        if job.parameters and 'model_set=' not in job.parameters:
-            job.parameters += f",model_set={model_set}"
-        elif not job.parameters:
-            job.parameters = f"model_set={model_set}"
-        session.commit()
+                
+            # Extract batch_size if available
+            if 'batch_size' in params:
+                batch_size = int(params.get('batch_size', 1))
+                logger.info(f"Using batch size: {batch_size}")
         
         # Check if the input file exists
         if not os.path.exists(job.input_file):
@@ -77,8 +76,8 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             return
             
         # Run the complete song processing (melody generation and vocal mix)
-        logger.info(f"Calling process_song with input file: {job.input_file} and model_set: {model_set}")
-        final_mix, beat_mix_file = process_song(
+        logger.info(f"Calling process_song with input file: {job.input_file}, model_set: {model_set}, batch_size: {batch_size}")
+        result = process_song(
             shared_dir=shared_dir, 
             input_bgm=job.input_file, 
             checkpoint=checkpoint, 
@@ -87,17 +86,62 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             start_time=start_time, 
             bpm=bpm,
             model_set=model_set,
-            sex=sex
+            sex=sex,
+            batch_size=batch_size
         )
         
-        logger.info(f"Processing complete. Output file: {final_mix}")
-        job.output_file = final_mix
+        # Handle different return values based on batch_size
+        if batch_size > 1:
+            # In batch mode, result is a tuple (list_of_final_mixes, beat_mix_file)
+            final_mixes, beat_mix_file = result
+            
+            if not final_mixes:
+                logger.error(f"No mixes generated for job {job_id}")
+                job.status = "failed"
+                session.commit()
+                return
+                
+            # Store all mix paths in a structured format for the UI to use
+            variant_mixes = {}
+            for i, mix in enumerate(final_mixes):
+                if mix:  # Only include successful mixes
+                    variant_mixes[f"variant_{i+1}"] = mix
+            
+            # Store the first successful mix as the main output file
+            if variant_mixes:
+                first_mix = next(iter(variant_mixes.values()))
+                job.output_file = first_mix
+                logger.info(f"Storing first mix as main output: {first_mix}")
+            else:
+                logger.error(f"No successful mixes generated for job {job_id}")
+                job.status = "failed"
+                session.commit()
+                return
+            
+            # Store variant mixes directly in the dedicated JSON column
+            job.variant_mixes_json = json.dumps(variant_mixes)
+            logger.info(f"Stored variant mixes in dedicated JSON column: {list(variant_mixes.keys())}")
+            
+            logger.info(f"Generated {len(variant_mixes)} variants for job {job_id}")
+            
+        else:
+            # In single track mode, result is a tuple (final_mix, beat_mix_file)
+            final_mix, beat_mix_file = result
+            
+            if not final_mix:
+                logger.error(f"No mix generated for job {job_id}")
+                job.status = "failed"
+                session.commit()
+                return
+                
+            logger.info(f"Processing complete. Output file: {final_mix}")
+            job.output_file = final_mix
+        
+        logger.info(f"Processing complete. Output file(s) saved.")
         
         # Try to upload files to GCP using the enhanced method
         try:
-            # Upload ALL files from job-specific directories using the upload_job_files function
-            # This will include timestamps in folder names and scan all files in the directories
-            # Removed model_set parameter as requested
+            # Upload ALL files from job-specific directories
             gcp_urls = upload_job_files(job_id, shared_dir)
             
             # Store all GCP URLs in the dedicated JSON column
@@ -107,9 +151,9 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
                 logger.info(f"Stored all GCP URLs in dedicated JSON column")
                 
                 # Also store the mixed track URL in the gcp_url field for backward compatibility
-                if any(k for k in gcp_urls.keys() if 'mixed' in k):
-                    # Find the first key containing 'mixed'
-                    mixed_key = next((k for k in gcp_urls.keys() if 'mixed' in k), None)
+                if any(k for k in gcp_urls.keys() if 'mixed' in k or 'mix' in k):
+                    # Find the first key containing 'mixed' or 'mix'
+                    mixed_key = next((k for k in gcp_urls.keys() if 'mixed' in k or 'mix' in k), None)
                     if mixed_key:
                         job.gcp_url = gcp_urls[mixed_key]
                         logger.info(f"Stored GCP URL in job record: {job.gcp_url}")
@@ -117,7 +161,6 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         except Exception as e:
             logger.error(f"Error uploading files to GCP: {str(e)}", exc_info=True)
             logger.info("Continuing with job processing despite GCP upload failure")
-        
         
         # Mark job as completed
         job.status = "completed"
@@ -131,7 +174,7 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         session.commit()
     finally:
         session.close()
-
+     
 def job_worker(checkpoint, gen_seed, shared_dir):
     """
     Background worker that continuously checks for pending jobs.

@@ -1,4 +1,4 @@
-# This script contains functions to run commands in Docker containers for melody generation and vocal mixing.
+# services.py
 import subprocess
 import os
 import logging
@@ -6,6 +6,9 @@ import time
 import json
 import pathlib
 import importlib.util
+import shutil
+import sys
+
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -197,20 +200,21 @@ def mix_vocals(original_bgm, melody_file, output_dir, container_name="vocal-mix-
     
     raise FileNotFoundError(f"Mix file {mix_file} was not created after waiting")
 
-def generate_melody_with_package(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, bpm=0):
+def generate_melody_with_package(input_bgm, checkpoint, gen_seed, output_dir, start_time=0, bpm=0, batch_size=1):
     """
     Generates melody using the melody_generation Python package (for model set 2).
     
     Args:
         input_bgm: Path to the original background music file
         checkpoint: Path to the checkpoint file
-        gen_seed: The seed for generation
+        gen_seed: The seed for generation (used only when batch_size=1)
         output_dir: The output directory for melody files
         start_time: Song start time in seconds
         bpm: Beats per minute
+        batch_size: Number of melodies to generate in parallel (default: 1)
         
     Returns:
-        Path to the generated melody MIDI file
+        List of paths to the generated melody MIDI files
     """
     try:
         # Check if the package is installed
@@ -220,8 +224,9 @@ def generate_melody_with_package(input_bgm, checkpoint, gen_seed, output_dir, st
         # Import the required modules
         from melody_generation.infer import create_model
         import melody_generation.beat_estimation.downbeat_estimation as dbe
+        import random
         
-        logger.info(f"Generating melody using Python package for {input_bgm} with seed {gen_seed}")
+        logger.info(f"Generating {batch_size} melodies using Python package for {input_bgm}")
         logger.info(f"Using start_time={start_time}, bpm={bpm}")
         
         # Create output directory
@@ -239,9 +244,9 @@ def generate_melody_with_package(input_bgm, checkpoint, gen_seed, output_dir, st
         )
         
         # Handle beat estimation
+        dbe_model = dbe.create_model()
         if start_time > 0 or bpm > 0:
             # Manual beat estimation
-            dbe_model = dbe.create_model()
             if start_time > 0 and bpm > 0:
                 dbe_res = dbe_model.estimate(
                     audio_filepath=input_bgm_path,
@@ -259,34 +264,55 @@ def generate_melody_with_package(input_bgm, checkpoint, gen_seed, output_dir, st
                 )
         else:
             # Automatic beat estimation
-            dbe_model = dbe.create_model()
             dbe_res = dbe_model.estimate(audio_filepath=input_bgm_path)
+            
+        # Generate beat mix for visualization
+        beat_mix_path = os.path.join(output_dir, "beat_mixed_synth_mix.wav")
+        try:
+            dbe.make_clicked_audio_by_beat_times_and_countings(
+                audio_filepath=input_bgm_path,
+                beat_times_and_countings=dbe_res,
+                save_path=pathlib.Path(beat_mix_path)
+            )
+            logger.info(f"Created beat mix visualization at: {beat_mix_path}")
+        except Exception as e:
+            logger.warning(f"Failed to create beat mix visualization: {str(e)}")
         
-        # Generate melody
-        seeds = [gen_seed] if gen_seed != 0 else None
+        # Generate seeds if batch_size > 1
+        if batch_size > 1:
+            seeds = [random.randint(1, 10000) for _ in range(batch_size)]
+            logger.info(f"Generated random seeds for batch processing: {seeds}")
+            save_synth_demo = False  # Disable synth demo for batch processing
+        else:
+            seeds = [gen_seed] if gen_seed != 0 else None
+            save_synth_demo = True
+        
+        # Generate melody using the API as documented
         paths = gen_model.infer(
             accompaniment_audio_filepath=input_bgm_path,
             beat_times_and_countings_filepath=dbe_res,
             seeds=seeds,
-            batch_size=1,
+            batch_size=batch_size,
             save_dir=output_dir_path,
-            save_synth_demo=True
+            save_synth_demo=save_synth_demo
         )
         
-        # The function returns a list of paths, we take the first one
-        melody_file = paths[0] if isinstance(paths, list) else paths
+        logger.info(f"Generated {len(paths) if isinstance(paths, list) else 1} melody files")
         
-        logger.info(f"Melody file generated at: {melody_file}")
+        # Handle the return value - could be a list or single path
+        melody_files = paths if isinstance(paths, list) else [paths]
         
-        # Copy the melody file to the expected location if it's not already there
-        expected_melody_file = os.path.join(output_dir, "melody.mid")
-        if str(melody_file) != expected_melody_file:
-            import shutil
-            shutil.copy2(melody_file, expected_melody_file)
-            logger.info(f"Copied melody file to: {expected_melody_file}")
-            melody_file = expected_melody_file
+        # For each melody file, create a uniquely named copy
+        named_melody_files = []
+        for i, melody_file in enumerate(melody_files):
+            seed_val = seeds[i] if seeds and i < len(seeds) else "random"
+            new_filename = f"melody_variant_{i+1}_seed_{seed_val}.mid"
+            new_path = os.path.join(output_dir, new_filename)
+            shutil.copy2(melody_file, new_path)
+            named_melody_files.append(new_path)
+            logger.info(f"Created uniquely named melody file: {new_path}")
         
-        return melody_file
+        return named_melody_files
         
     except Exception as e:
         logger.error(f"Error generating melody with package: {str(e)}", exc_info=True)
@@ -367,12 +393,12 @@ def mix_vocals_with_package(original_bgm, melody_file, output_dir, sex="female")
         logger.error(f"Error mixing vocals with package: {str(e)}", exc_info=True)
         raise
 
-def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0, model_set="set1", sex="female"):
+def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0, model_set="set1", sex="female", batch_size=1):
     """
     Orchestrates the complete workflow:
       1. Runs melody generation.
       2. Runs vocal mixing.
-      3. Returns the final mix path and beat mix path.
+      3. Returns the final mix paths and beat mix path.
       
     Args:
         shared_dir: Base shared directory
@@ -384,6 +410,11 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         bpm: Beats per minute
         model_set: Which model set to use ('set1' or 'set2', defaults to 'set1')
         sex: Voice type to use ("female" or "male")
+        batch_size: Number of melodies to generate in parallel (default: 1)
+        
+    Returns:
+        If batch_size=1: (final_mix_path, beat_mix_file_path)
+        If batch_size>1: (list_of_final_mix_paths, beat_mix_file_path)
     """
     try:
         # Create job-specific output directories if job_id is provided
@@ -400,21 +431,16 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         
         # Determine which approach to use based on model_set
         if model_set == 'set2':
-            # Check if required packages are installed
+            # Check requirements - same as before
             melody_gen_installed = importlib.util.find_spec("melody_generation") is not None
             vocalmix_installed = importlib.util.find_spec("vocalmix") is not None
-            
-            # Check if required files exist
             sdk_exists = os.path.exists("/app/dreamtonics_sdk")
-            
-            # Get the checkpoint path from environment variable if available
             model_checkpoint_path = os.environ.get("MODEL_CHECKPOINT_PATH", "/app/checkpoints")
             model_config_path = os.environ.get("MODEL_CONFIG_PATH", "/app/configs")
-            
             checkpoint_exists = os.path.exists(model_checkpoint_path)
             config_exists = os.path.exists(model_config_path)
             
-            # Log the status of all requirements
+            # Log requirements status
             logger.info(f"Model set 2 requirements check:")
             logger.info(f"  - melody_generation package: {'installed' if melody_gen_installed else 'NOT INSTALLED'}")
             logger.info(f"  - vocalmix package: {'installed' if vocalmix_installed else 'NOT INSTALLED'}")
@@ -427,57 +453,105 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                 # Use Python packages for model set 2
                 logger.info(f"All requirements for model_set='set2' are met. Using Python packages.")
                 logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set} (Python packages)")
-                logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}")
+                logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}, batch_size={batch_size}")
                 
                 # Use the checkpoint path from environment variable
                 checkpoint_to_use = model_checkpoint_path
                 
-                # Generate melody using the Python package
-                melody_file = generate_melody_with_package(
-                    input_bgm=input_bgm,
-                    checkpoint=checkpoint_to_use,
-                    gen_seed=gen_seed,
-                    output_dir=melody_output_dir,
-                    start_time=start_time,
-                    bpm=bpm
-                )
-                logger.info(f"Melody file generated successfully at: {melody_file}")
+                # Generate melody (or melodies) using the Python package
+                try:
+                    melody_files = generate_melody_with_package(
+                        input_bgm=input_bgm,
+                        checkpoint=checkpoint_to_use,
+                        gen_seed=gen_seed,
+                        output_dir=melody_output_dir,
+                        start_time=start_time,
+                        bpm=bpm,
+                        batch_size=batch_size
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to generate melodies with package: {str(e)}")
+                    raise
+                
+                # Ensure melody_files is a list even if only one file is returned
+                if not isinstance(melody_files, list):
+                    melody_files = [melody_files]
+                
+                logger.info(f"Generated {len(melody_files)} melody files successfully")
                 
                 # Check for beat_mixed_synth_mix.wav file
                 beat_mix_file = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
                 if os.path.exists(beat_mix_file):
-                    logger.info(f"Beat mix file found at: {beat_mix_file}")
+                    logger.info(f"Found beat mix file at: {beat_mix_file}")
                 else:
                     logger.warning(f"Beat mix file not found at: {beat_mix_file}")
                     beat_mix_file = None
                 
-                # Mix vocals using the Python package
-                try:
-                    final_mix = mix_vocals_with_package(
-                        original_bgm=input_bgm,
-                        melody_file=melody_file,
-                        output_dir=vocal_output_dir,
-                        sex=sex
-                    )
-                    logger.info(f"Final mix generated successfully at: {final_mix}")
-                except Exception as e:
-                    logger.error(f"Error in vocal mixing: {str(e)}")
-                    logger.info("Falling back to model set 1 for vocal mixing")
-                    
-                    # Fall back to model set 1 for vocal mixing only
-                    vocal_container = "vocal-mix-set1"
-                    final_mix = mix_vocals(
-                        original_bgm=input_bgm,
-                        melody_file=melody_file,
-                        output_dir=vocal_output_dir,
-                        container_name=vocal_container,
-                        sex=sex
-                    )
-                    logger.info(f"Final mix generated successfully using fallback method at: {final_mix}")
+                # Process each melody file separately
+                final_mixes = []
                 
-                return final_mix, beat_mix_file
+                for i, melody_file in enumerate(melody_files):
+                    # Create a variant-specific output directory for each melody
+                    variant_dir = os.path.join(vocal_output_dir, f"variant_{i+1}")
+                    os.makedirs(variant_dir, exist_ok=True)
+                    logger.info(f"Processing melody variant {i+1}: {melody_file}")
+                    
+                    try:
+                        # Generate "la" syllables for vocals according to the documentation
+                        from vocalmix.fuwari.core import get_notes_num, make_all_same_char_fuwarare
+                        
+                        # Get the number of notes in the melody
+                        notes_num = get_notes_num(midi_filepath=pathlib.Path(melody_file))
+                        
+                        # Create a fuwarare file with all "ら" characters
+                        path_to_fuwarare = make_all_same_char_fuwarare(notes_num=notes_num, char="ら")
+                        
+                        # Generate vocals using vocalmix
+                        from vocalmix.core import vocalmix
+                        
+                        paths = vocalmix(
+                            bgm_filepath=pathlib.Path(input_bgm),
+                            melody_filepath=pathlib.Path(melody_file),
+                            fuwarare_filepath=path_to_fuwarare,
+                            dreamtonics_sdk_path=pathlib.Path("/app/dreamtonics_sdk"),
+                            sex=sex,
+                            write_dirpath=pathlib.Path(variant_dir)
+                        )
+                        
+                        # Paths should be a tuple of (vocal_path, mix_path)
+                        vocal_path, mix_path = paths
+                        
+                        logger.info(f"Variant {i+1} mix generated successfully at: {mix_path}")
+                        final_mixes.append(str(mix_path))
+                    except Exception as e:
+                        logger.error(f"Error in vocal mixing for variant {i+1}: {str(e)}")
+                        try:
+                            # Fall back to model set 1 for this variant
+                            logger.info(f"Falling back to model set 1 for vocal mixing variant {i+1}")
+                            vocal_container = "vocal-mix-set1"
+                            final_mix = mix_vocals(
+                                original_bgm=input_bgm,
+                                melody_file=melody_file,
+                                output_dir=variant_dir,
+                                container_name=vocal_container,
+                                sex=sex
+                            )
+                            logger.info(f"Variant {i+1} mix generated successfully using fallback method at: {final_mix}")
+                            final_mixes.append(final_mix)
+                        except Exception as nested_e:
+                            logger.error(f"Fallback also failed for variant {i+1}: {str(nested_e)}")
+                            final_mixes.append(None)  # Add None to maintain ordering
+                
+                # If batch_size is 1, return the single result as before
+                if batch_size == 1 and len(final_mixes) > 0:
+                    return final_mixes[0], beat_mix_file
+                else:
+                    # Otherwise return the list of all final mixes
+                    return final_mixes, beat_mix_file
+                    
             else:
                 # Some requirements are not met, fall back to model set 1
+                # (Fallback code same as before)
                 missing_requirements = []
                 if not melody_gen_installed:
                     missing_requirements.append("melody_generation package")
@@ -507,6 +581,7 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                 os.makedirs(vocal_output_dir, exist_ok=True)
         
         # If model_set is 'set1' or we've fallen back to it
+        # This code doesn't support batch processing, so batch_size is ignored
         melody_container = "melody-generation-set1"
         vocal_container = "vocal-mix-set1"
         
@@ -544,10 +619,16 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         )
         logger.info(f"Final mix generated successfully at: {final_mix}")
         
-        # Return both the final mix and beat mix file paths
-        return final_mix, beat_mix_file
+        # For compatibility with batch mode, wrap the single result in a list if batch_size > 1
+        if batch_size > 1:
+            return [final_mix], beat_mix_file
+        else:
+            return final_mix, beat_mix_file
         
     except Exception as e:
         logger.error(f"Error in process_song: {str(e)}", exc_info=True)
         # Return default values for Gradio interface to avoid the "not enough output values" error
-        return None, None
+        if batch_size > 1:
+            return [], None
+        else:
+            return None, None

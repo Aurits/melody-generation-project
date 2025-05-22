@@ -1,5 +1,3 @@
-# app.py
-# Improved Melody Generator interface with better file handling and job organization
 import os
 import time
 import logging
@@ -12,6 +10,8 @@ import datetime
 import shutil
 import uuid
 import json
+import random
+import numpy as np
 
 # -------------------- 
 # Configure Logging
@@ -104,6 +104,78 @@ def format_duration(seconds):
     else:
         hours = seconds / 3600
         return f"{hours:.1f} hours"
+
+def load_audio_file(file_path):
+    """
+    Load audio data from a file path.
+    Returns a tuple of (sample_rate, audio_data) or None if the file doesn't exist.
+    """
+    if not file_path or not os.path.exists(file_path):
+        logger.warning(f"Audio file not found: {file_path}")
+        return None
+    
+    try:
+        from scipy.io import wavfile
+        
+        # Check if the file is an MP3
+        if file_path.lower().endswith('.mp3'):
+            # For MP3 files, we need to convert them to WAV first
+            try:
+                import tempfile
+                import subprocess
+                
+                # Create a temporary WAV file
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav:
+                    temp_wav_path = temp_wav.name
+                
+                # Convert MP3 to WAV using ffmpeg
+                subprocess.run(
+                    ["ffmpeg", "-i", file_path, "-acodec", "pcm_s16le", "-ar", "44100", temp_wav_path],
+                    check=True,
+                    capture_output=True
+                )
+                
+                # Read the WAV file
+                sample_rate, audio_data = wavfile.read(temp_wav_path)
+                
+                # Clean up the temporary file
+                os.unlink(temp_wav_path)
+                
+                return (sample_rate, audio_data)
+                
+            except Exception as e:
+                logger.error(f"Error converting MP3 to WAV: {str(e)}")
+                return None
+        else:
+            # For WAV files, read directly
+            sample_rate, audio_data = wavfile.read(file_path)
+            return (sample_rate, audio_data)
+            
+    except Exception as e:
+        logger.error(f"Error loading audio file {file_path}: {str(e)}")
+        return None
+
+def copy_to_temp(file_path):
+    """Copy a file to the temp directory to make it accessible to Gradio"""
+    if not file_path or not os.path.exists(file_path):
+        return None
+        
+    # Create a temp directory if it doesn't exist
+    temp_dir = "/tmp/melody_generator"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Create a new filename in the temp directory
+    filename = os.path.basename(file_path)
+    temp_path = os.path.join(temp_dir, filename)
+    
+    # Copy the file
+    try:
+        shutil.copy2(file_path, temp_path)
+        logger.info(f"Copied {file_path} to {temp_path} for Gradio access")
+        return temp_path
+    except Exception as e:
+        logger.error(f"Failed to copy file to temp directory: {str(e)}")
+        return None
 
 # -------------------- 
 # Job Polling Function
@@ -443,25 +515,28 @@ def get_current_job_status():
 # -------------------- 
 # Gradio UI Functions
 # -------------------- 
-def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_type, progress=gr.Progress()):
+def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_type, enable_batch_mode=False, progress=gr.Progress()):
     global current_job_id
     
     if file is None:
         logger.warning("Job submission attempted with no file")
-        return "⚠️ Please upload a backing track first", None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return "⚠️ Please upload a backing track first", None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
     
     # Validate inputs
     if start_time > 0 and (not bpm or bpm <= 0):
         error = "If start_time is greater than 0, BPM must also be greater than 0."
         logger.warning(error)
-        return error, None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return error, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
     
     try:
         progress(0, "Initializing...")
         
-        # Handle randomized seed if checkbox is checked
-        if randomize_seed:
-            import random
+        # Set batch size based on enable_batch_mode checkbox and model_set
+        # Only enable batch mode for model set 2 ("new")
+        batch_size = 3 if enable_batch_mode and model_set == "set2" else 1
+        
+        # Handle randomized seed if checkbox is checked (for single track mode only)
+        if randomize_seed and batch_size == 1:
             seed = random.randint(0, 10000)
             logger.info(f"Randomized seed to: {seed}")
         
@@ -469,13 +544,13 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
         session = SessionLocal()
         job = Job(
             status="pending",
-            parameters=f"start_time={start_time},bpm={bpm},seed={seed},model_set={model_set},sex={voice_type}"
+            parameters=f"start_time={start_time},bpm={bpm},seed={seed},model_set={model_set},sex={voice_type},batch_size={batch_size}"
         )
         session.add(job)
         session.commit()
         job_id = job.id
         current_job_id = job_id  # Set the global current job ID
-        logger.info(f"Created job {job_id} with model_set={model_set} and voice_type={voice_type}")
+        logger.info(f"Created job {job_id} with model_set={model_set}, voice_type={voice_type}, batch_size={batch_size}")
         
         # Create job-specific directories
         job_input_dir, job_melody_dir, job_vocal_dir = create_job_directories(job_id)
@@ -545,142 +620,255 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
             
             input_filename_base, input_ext = os.path.splitext(original_filename)
             
-            # Define output filenames with the requested format
-            model_display_name = "old" if model_set == "set1" else "new"
-            vocal_filename = f"vocal_melody_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
-            mixed_filename = f"mixed_audio_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
-            midi_filename = f"melody_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.mid"
-            beat_mix_filename = f"beat_mix_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
+            # Handle batch mode differently
+            if batch_size > 1:
+                # Get variant mix paths from job parameters
+                session = SessionLocal()
+                job = session.query(Job).filter(Job.id == job_id).first()
+                
+                variant_mixes = {}
+                if job and job.variant_mixes_json:
+                    try:
+                        variant_mixes = json.loads(job.variant_mixes_json)
+                        logger.info(f"Found variant mixes in job.variant_mixes_json: {list(variant_mixes.keys())}")
+                    except Exception as e:
+                        logger.error(f"Error parsing variant_mixes_json: {str(e)}")
+                
+                # If no variants were found in the JSON column, try to find them based on directory structure
+                if not variant_mixes:
+                    logger.info("No variant mixes found in job.variant_mixes_json, searching directories...")
+                    model_suffix = f"_{model_set}"
+                    
+                    # Search for variant directories and files
+                    for i in range(1, batch_size + 1):
+                        variant_dir = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", f"variant_{i}")
+                        if os.path.exists(variant_dir):
+                            # Look for mix files with different possible names
+                            possible_mix_files = [
+                                os.path.join(variant_dir, "mix.wav"),
+                                os.path.join(variant_dir, "mix.mp3"),
+                                # Add more patterns if needed
+                            ]
+                            
+                            # Also look for any file with "mix" in the name
+                            for file in os.listdir(variant_dir):
+                                if "mix" in file.lower() and (file.endswith(".wav") or file.endswith(".mp3")):
+                                    possible_mix_files.append(os.path.join(variant_dir, file))
+                            
+                            # Check each possible mix file
+                            for mix_file in possible_mix_files:
+                                if os.path.exists(mix_file):
+                                    variant_mixes[f"variant_{i}"] = mix_file
+                                    logger.info(f"Found variant mix: {mix_file}")
+                                    break
+                
+                session.close()
+           
+                # If no variants were found, try to find them based on directory structure
+                if not variant_mixes:
+                    logger.info("No variant mixes found in job parameters, searching directories...")
+                    model_suffix = f"_{model_set}"
+                    for i in range(batch_size):
+                        variant_dir = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", f"variant_{i+1}")
+                        if os.path.exists(variant_dir):
+                            mix_file = os.path.join(variant_dir, "mix.wav")
+                            if os.path.exists(mix_file):
+                                variant_mixes[f"variant_{i+1}"] = mix_file
+                                logger.info(f"Found variant mix: {mix_file}")
+                
+                # Look for beat mix file
+                beat_mix_path = os.path.join(SHARED_DIR, f"melody_results_{model_set}", f"job_{job_id}", "beat_mixed_synth_mix.wav")
+                if not os.path.exists(beat_mix_path):
+                    beat_mix_path = None
+                    
+                    # Try alternative locations
+                    alternative_beat_mix_paths = [
+                        os.path.join(SHARED_DIR, f"melody_results_{model_set}", "beat_mixed_synth_mix.wav"),
+                        os.path.join(SHARED_DIR, f"melody_results", f"job_{job_id}", "beat_mixed_synth_mix.wav")
+                    ]
+                    
+                    for path in alternative_beat_mix_paths:
+                        if os.path.exists(path):
+                            beat_mix_path = path
+                            logger.info(f"Found beat mix file at alternative location: {beat_mix_path}")
+                            break
+                
+                # Prepare the variants for display
+                variant1 = variant_mixes.get("variant_1", None)
+                variant2 = variant_mixes.get("variant_2", None)
+                variant3 = variant_mixes.get("variant_3", None)
+                
+                if variant1 or variant2 or variant3:
+                    success_message = f"✅ Generated {len(variant_mixes)} melody variants! (Job ID: {job_id}, Model: {model_set}, Voice: {voice_type})"
+                    
+                    # Update recent jobs display and current job status
+                    recent_jobs_html = get_recent_jobs()
+                    current_job_status = get_current_job_status()
+                    
+                    # Return the variants for display - in batch mode we don't show vocal or MIDI previews
+                    return (
+                        success_message, 
+                        None,  # No vocal preview in batch mode
+                        variant1,  # First variant as mixed preview
+                        None,  # No MIDI preview in batch mode 
+                        beat_mix_path,
+                        variant2,  # Second variant
+                        variant3,  # Third variant
+                        recent_jobs_html, 
+                        current_job_status
+                    )
+                else:
+                    error_message = f"⚠️ Job completed but no variant files found (Job ID: {job_id})"
+                    return error_message, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
             
-            # Add model set suffix to directories
-            model_suffix = f"_{model_set}"
-            
-            # Define paths in job-specific directories
-            vocal_path = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", vocal_filename)
-            mixed_path = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", mixed_filename)
-            midi_path = os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", midi_filename)
-            beat_mix_path = os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", beat_mix_filename)
-            
-            # Get the original output paths
-            output_dir = os.path.dirname(output_file)
-            vocal_melody_path = os.path.join(output_dir, "vocal.wav")
-            mixed_track_path = output_file  # This is the mix.wav file
-            
-            # Check multiple possible locations for the MIDI file
-            possible_midi_paths = [
-                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", "melody.mid"),
-                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", "melody.mid"),
-                os.path.join(output_dir, "melody.mid")
-            ]
-            
-            # Check multiple possible locations for the beat mix file
-            possible_beat_mix_paths = [
-                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", "beat_mixed_synth_mix.wav"),
-                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", "beat_mixed_synth_mix.wav"),
-                os.path.join(output_dir, "beat_mixed_synth_mix.wav")
-            ]
-            
-            midi_file_path = None
-            for path in possible_midi_paths:
-                if os.path.exists(path):
-                    midi_file_path = path
-                    logger.info(f"Found MIDI file at: {midi_file_path}")
-                    break
-            
-            beat_mix_file_path = None
-            for path in possible_beat_mix_paths:
-                if os.path.exists(path):
-                    beat_mix_file_path = path
-                    logger.info(f"Found beat mix file at: {beat_mix_file_path}")
-                    break
-            
-            # Copy files to job-specific directories if they exist
-            files_copied = []
-            
-            if os.path.exists(vocal_melody_path):
-                os.makedirs(os.path.dirname(vocal_path), exist_ok=True)
-                shutil.copy2(vocal_melody_path, vocal_path)
-                logger.info(f"Copied vocal file to {vocal_path}")
-                files_copied.append("vocal")
             else:
-                logger.warning(f"Vocal file not found at {vocal_melody_path}")
-            
-            if os.path.exists(mixed_track_path):
-                os.makedirs(os.path.dirname(mixed_path), exist_ok=True)
-                shutil.copy2(mixed_track_path, mixed_path)
-                logger.info(f"Copied mixed file to {mixed_path}")
-                files_copied.append("mixed")
-            else:
-                logger.warning(f"Mixed file not found at {mixed_track_path}")
-            
-            if midi_file_path and os.path.exists(midi_file_path):
-                os.makedirs(os.path.dirname(midi_path), exist_ok=True)
-                shutil.copy2(midi_file_path, midi_path)
-                logger.info(f"Copied MIDI file to {midi_path}")
-                files_copied.append("midi")
-            else:
-                logger.warning("MIDI file not found in any of the expected locations")
-            
-            if beat_mix_file_path and os.path.exists(beat_mix_file_path):
-                os.makedirs(os.path.dirname(beat_mix_path), exist_ok=True)
-                shutil.copy2(beat_mix_file_path, beat_mix_path)
-                logger.info(f"Copied beat mix file to {beat_mix_path}")
-                files_copied.append("beat_mix")
-            else:
-                logger.warning("Beat mix file not found in any of the expected locations")
-            
-            # Make sure the audio files are readable by the current user
-            try:
-                for path in [vocal_path, mixed_path, midi_path, beat_mix_path]:
+                # Original single track processing logic
+                # Define output filenames with the requested format
+                model_display_name = "old" if model_set == "set1" else "new"
+                vocal_filename = f"vocal_melody_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
+                mixed_filename = f"mixed_audio_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
+                midi_filename = f"melody_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.mid"
+                beat_mix_filename = f"beat_mix_{model_display_name}_{input_filename_base}_seed{seed}_{unique_id}.wav"
+                
+                # Add model set suffix to directories
+                model_suffix = f"_{model_set}"
+                
+                # Define paths in job-specific directories
+                vocal_path = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", vocal_filename)
+                mixed_path = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", mixed_filename)
+                midi_path = os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", midi_filename)
+                beat_mix_path = os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", beat_mix_filename)
+                
+                # Get the original output paths
+                if output_file:
+                    output_dir = os.path.dirname(output_file)
+                    vocal_melody_path = os.path.join(output_dir, "vocal.wav")
+                    mixed_track_path = output_file  # This is the mix.wav file
+                else:
+                    logger.warning("Output file is None, using fallback paths")
+                    output_dir = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}")
+                    vocal_melody_path = os.path.join(output_dir, "vocal.wav")
+                    mixed_track_path = os.path.join(output_dir, "mix.wav")
+                
+                # Check multiple possible locations for the MIDI file
+                possible_midi_paths = [
+                    os.path.join(SHARED_DIR, f"melody_results{model_suffix}", "melody.mid"),
+                    os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", "melody.mid"),
+                    os.path.join(output_dir, "melody.mid")
+                ]
+                
+                # Check multiple possible locations for the beat mix file
+                possible_beat_mix_paths = [
+                    os.path.join(SHARED_DIR, f"melody_results{model_suffix}", "beat_mixed_synth_mix.wav"),
+                    os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", "beat_mixed_synth_mix.wav"),
+                    os.path.join(output_dir, "beat_mixed_synth_mix.wav")
+                ]
+                
+                midi_file_path = None
+                for path in possible_midi_paths:
                     if os.path.exists(path):
-                        os.chmod(path, 0o644)
-            except Exception as e:
-                logger.warning(f"Could not set file permissions: {str(e)}")
-            
-            # Update the job record with the new output file path
-            session = SessionLocal()
-            job = session.query(Job).filter(Job.id == job_id).first()
-            job.output_file = mixed_path if os.path.exists(mixed_path) else output_file
-            session.commit()
-            session.close()
-            
-            progress(1.0, "Generation complete!")
-            
-            # Consider the job successful if at least the mixed track is available
-            if "mixed" in files_copied:
-                success_message = f"✅ Generation complete! (Job ID: {job_id}, Model: {model_set}, Voice: {voice_type})"
+                        midi_file_path = path
+                        logger.info(f"Found MIDI file at: {midi_file_path}")
+                        break
                 
-                # Log the paths being returned to the UI
-                if "vocal" in files_copied:
-                    logger.info(f"Returning vocal path: {vocal_path}")
+                beat_mix_file_path = None
+                for path in possible_beat_mix_paths:
+                    if os.path.exists(path):
+                        beat_mix_file_path = path
+                        logger.info(f"Found beat mix file at: {beat_mix_file_path}")
+                        break
+                
+                # Copy files to job-specific directories if they exist
+                files_copied = []
+                
+                if os.path.exists(vocal_melody_path):
+                    os.makedirs(os.path.dirname(vocal_path), exist_ok=True)
+                    shutil.copy2(vocal_melody_path, vocal_path)
+                    logger.info(f"Copied vocal file to {vocal_path}")
+                    files_copied.append("vocal")
+                else:
+                    logger.warning(f"Vocal file not found at {vocal_melody_path}")
+                
+                if os.path.exists(mixed_track_path):
+                    os.makedirs(os.path.dirname(mixed_path), exist_ok=True)
+                    shutil.copy2(mixed_track_path, mixed_path)
+                    logger.info(f"Copied mixed file to {mixed_path}")
+                    files_copied.append("mixed")
+                else:
+                    logger.warning(f"Mixed file not found at {mixed_track_path}")
+                
+                if midi_file_path and os.path.exists(midi_file_path):
+                    os.makedirs(os.path.dirname(midi_path), exist_ok=True)
+                    shutil.copy2(midi_file_path, midi_path)
+                    logger.info(f"Copied MIDI file to {midi_path}")
+                    files_copied.append("midi")
+                else:
+                    logger.warning("MIDI file not found in any of the expected locations")
+                
+                if beat_mix_file_path and os.path.exists(beat_mix_file_path):
+                    os.makedirs(os.path.dirname(beat_mix_path), exist_ok=True)
+                    shutil.copy2(beat_mix_file_path, beat_mix_path)
+                    logger.info(f"Copied beat mix file to {beat_mix_path}")
+                    files_copied.append("beat_mix")
+                else:
+                    logger.warning("Beat mix file not found in any of the expected locations")
+                
+                # Make sure the audio files are readable by the current user
+                try:
+                    for path in [vocal_path, mixed_path, midi_path, beat_mix_path]:
+                        if os.path.exists(path):
+                            os.chmod(path, 0o644)
+                except Exception as e:
+                    logger.warning(f"Could not set file permissions: {str(e)}")
+                
+                # Update the job record with the new output file path
+                session = SessionLocal()
+                job = session.query(Job).filter(Job.id == job_id).first()
+                job.output_file = mixed_path if os.path.exists(mixed_path) else output_file
+                session.commit()
+                session.close()
+                
+                progress(1.0, "Generation complete!")
+                
+                # Consider the job successful if at least the mixed track is available
                 if "mixed" in files_copied:
-                    logger.info(f"Returning mixed path: {mixed_path}")
-                if "midi" in files_copied:
-                    logger.info(f"Returning MIDI path: {midi_path}")
-                if "beat_mix" in files_copied:
-                    logger.info(f"Returning beat mix path: {beat_mix_path}")
-                
-                # Update recent jobs display and current job status
-                recent_jobs_html = get_recent_jobs()
-                current_job_status = get_current_job_status()
-                
-                # Return all outputs, using None for any missing files
-                return (
-                    success_message, 
-                    vocal_path if "vocal" in files_copied else None, 
-                    mixed_path if "mixed" in files_copied else None, 
-                    midi_path if "midi" in files_copied else None,
-                    beat_mix_path if "beat_mix" in files_copied else None,  # Add beat mix file
-                    recent_jobs_html, 
-                    current_job_status
-                )
-            else:
-                error_message = f"⚠️ Job completed but essential files are missing (Job ID: {job_id})"
-                return error_message, None, None, None, None, get_recent_jobs(), get_current_job_status()
+                    success_message = f"✅ Generation complete! (Job ID: {job_id}, Model: {model_set}, Voice: {voice_type})"
+                    
+                    # Log the paths being returned to the UI
+                    if "vocal" in files_copied:
+                        logger.info(f"Returning vocal path: {vocal_path}")
+                    if "mixed" in files_copied:
+                        logger.info(f"Returning mixed path: {mixed_path}")
+                    if "midi" in files_copied:
+                        logger.info(f"Returning MIDI path: {midi_path}")
+                    if "beat_mix" in files_copied:
+                        logger.info(f"Returning beat mix path: {beat_mix_path}")
+                    
+                    # Update recent jobs display and current job status
+                    recent_jobs_html = get_recent_jobs()
+                    current_job_status = get_current_job_status()
+                    
+                    # Return all outputs, using None for any missing files
+                    # For non-batch mode, the variant outputs are None
+                    return (
+                        success_message, 
+                        vocal_path if "vocal" in files_copied else None, 
+                        mixed_path if "mixed" in files_copied else None, 
+                        midi_path if "midi" in files_copied else None,
+                        beat_mix_path if "beat_mix" in files_copied else None,
+                        None,  # variant2 is None in single track mode
+                        None,  # variant3 is None in single track mode
+                        recent_jobs_html, 
+                        current_job_status
+                    )
+                else:
+                    error_message = f"⚠️ Job completed but essential files are missing (Job ID: {job_id})"
+                    return error_message, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
 
     except Exception as e:
         logger.error(f"Error generating melodies: {str(e)}", exc_info=True)
-        return f"❌ Error: {str(e)}", None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return f"❌ Error: {str(e)}", None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+
 
 # Function to randomize the seed value
 def randomize_seed_value():
@@ -715,8 +903,8 @@ with gr.Blocks(title="Melody Generator") as demo:
                     file_input = gr.Audio(
                         label="Upload Backing Track (WAV)",
                         type="filepath"
-                    )
-                    
+                    )               
+
                     with gr.Accordion("Advanced Settings", open=False):
                         
                         gr.Markdown("#### Model Selection")
@@ -735,6 +923,20 @@ with gr.Blocks(title="Melody Generator") as demo:
                                 value="female",
                                 interactive=True
                             )
+                        
+                        # New option for batch mode
+                        enable_batch_mode = gr.Checkbox(
+                            label="Generate Multiple Variants (New Model Only)",
+                            value=False,
+                            interactive=True
+                        )
+                        
+                        # Help text for batch mode
+                        batch_help = gr.Markdown(
+                            "When enabled, 3 different melody variants will be generated with random seeds. "
+                            "This feature only works with the New model. "
+                            "Seed selection is disabled in this mode."
+                        )
 
                         gr.Markdown("#### Beat Estimation")
                         gr.Markdown(
@@ -757,26 +959,26 @@ with gr.Blocks(title="Melody Generator") as demo:
                                 interactive=True
                             )
                         
-                        gr.Markdown("#### Randomization Control")
-                        
-                        with gr.Row():
-                            seed = gr.Number(
-                                label="Seed (optional, integer)",
-                                value=0,
-                                precision=0,
-                                interactive=True
-                            )
+                        # Seed controls in a group to control visibility
+                        with gr.Group(elem_id="seed-controls") as seed_controls:
+                            gr.Markdown("#### Randomization Control")
                             
-                            randomize_seed = gr.Checkbox(
-                                label="Randomize Seed",
-                                value=True,
-                                interactive=True
-                            )
-                        
-                        randomize_btn = gr.Button("New Random Seed")
-                        randomize_btn.click(fn=randomize_seed_value, outputs=seed)
-                        
-                        
+                            with gr.Row():
+                                seed = gr.Number(
+                                    label="Seed (optional, integer)",
+                                    value=0,
+                                    precision=0,
+                                    interactive=True
+                                )
+                                
+                                randomize_seed = gr.Checkbox(
+                                    label="Randomize Seed",
+                                    value=True,
+                                    interactive=True
+                                )
+                            
+                            randomize_btn = gr.Button("New Random Seed")
+                            randomize_btn.click(fn=randomize_seed_value, outputs=seed)
                     
                     status_message = gr.Markdown("Upload a track and click Generate.")
                     generate_btn = gr.Button("Generate Melodies", variant="primary", size="lg")
@@ -785,44 +987,91 @@ with gr.Blocks(title="Melody Generator") as demo:
                 with gr.Column():
                     gr.Markdown("### Preview")
                     
-                    gr.Markdown("#### Vocal Melody")
-                    vocal_preview = gr.Audio(
-                        label="Vocal Track (WAV)",
-                        type="filepath",
-                        value=None, 
-                        interactive=False,
-                        autoplay=False,
-                        show_download_button=True,
-                    )
+                    # Single variant view (visible when batch mode is off)
+                    with gr.Group(visible=True) as single_variant_view:
+                        gr.Markdown("#### Vocal Melody")
+                        vocal_preview = gr.Audio(
+                            label="Vocal Track (WAV)",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=False,
+                            show_download_button=True,
+                        )
 
-                    gr.Markdown("#### Mixed Track")
-                    mixed_preview = gr.Audio(
-                        label="Mixed Track (WAV)",
-                        type="filepath",
-                        value=None, 
-                        interactive=False,
-                        autoplay=True,
-                        show_download_button=True,
-                    )
+                        gr.Markdown("#### Mixed Track")
+                        mixed_preview = gr.Audio(
+                            label="Mixed Track (WAV)",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=True,
+                            show_download_button=True,
+                        )
 
-                    gr.Markdown("#### Beat Estimation Mix")
-                    beat_mix_preview = gr.Audio(
-                        label="Beat Estimation Mix (WAV)",
-                        type="filepath",
-                        value=None, 
-                        interactive=False,
-                        autoplay=False,
-                        show_download_button=True,
-                    )
+                        gr.Markdown("#### Beat Estimation Mix")
+                        beat_mix_preview = gr.Audio(
+                            label="Beat Estimation Mix (WAV)",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=False,
+                            show_download_button=True,
+                        )
+                        
+                        gr.Markdown("#### MIDI File")
+                        midi_preview = gr.File(
+                            label="MIDI Melody",
+                            value=None,  
+                            interactive=False,
+                            file_count="single",
+                            type="filepath",
+                        )
                     
-                    gr.Markdown("#### MIDI File")
-                    midi_preview = gr.File(
-                        label="MIDI Melody",
-                        value=None,  
-                        interactive=False,
-                        file_count="single",
-                        type="filepath",
-                    )
+                    # Multi-variant view (visible when batch mode is on)
+                    with gr.Group(visible=False) as multi_variant_view:
+                        gr.Markdown("### Melody Variants Comparison")
+                        gr.Markdown("Listen to these three melody variants generated with different random seeds:")
+                        
+                        with gr.Row():
+                            variant1_preview = gr.Audio(
+                                label="Variant 1",
+                                type="filepath",
+                                value=None, 
+                                interactive=False,
+                                autoplay=False,
+                                show_download_button=True,
+                            )
+                        
+                        with gr.Row():
+                            variant2_preview = gr.Audio(
+                                label="Variant 2",
+                                type="filepath",
+                                value=None, 
+                                interactive=False,
+                                autoplay=False,
+                                show_download_button=True,
+                            )
+                        
+                        with gr.Row():
+                            variant3_preview = gr.Audio(
+                                label="Variant 3",
+                                type="filepath",
+                                value=None, 
+                                interactive=False,
+                                autoplay=False,
+                                show_download_button=True,
+                            )
+                        
+                        gr.Markdown("#### Beat Detection")
+                        batch_beat_mix_preview = gr.Audio(
+                            label="Beat Detection Mix",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=False,
+                            show_download_button=True,
+                        )
         
         # Recent Jobs tab
         with gr.TabItem("Recent Jobs"):
@@ -864,24 +1113,69 @@ with gr.Blocks(title="Melody Generator") as demo:
             Jobs are processed in the background and results are available when processing completes.
             """)
     
+    # Function to toggle UI elements based on batch mode
+    def toggle_batch_mode(enable_batch, model_selection):
+        """Toggle UI elements based on batch mode and model selection"""
+        # Only enable batch mode for model set 2 ("new")
+        is_new_model = model_selection == "set2"
+        can_use_batch = enable_batch and is_new_model
+        
+        if can_use_batch:
+            # Show batch view, hide single variant view, hide seed controls
+            return (
+                gr.update(visible=False),  # single_variant_view
+                gr.update(visible=True),   # multi_variant_view
+                gr.update(visible=False),  # seed_controls
+                gr.update(value="When multiple variants mode is enabled, 3 different melody variants will be generated with random seeds. Individual downloads are disabled in this preview mode.") # batch_help
+            )
+        else:
+            # If batch mode is checked but old model is selected
+            if enable_batch and not is_new_model:
+                help_text = "Multiple variants mode is only available with the New model. Please select the New model to enable this feature."
+            else:
+                help_text = "When enabled, 3 different melody variants will be generated with random seeds. This feature only works with the New model. Seed selection is disabled in this mode."
+                
+            # Show single variant view, hide batch view, show seed controls
+            return (
+                gr.update(visible=True),   # single_variant_view
+                gr.update(visible=False),  # multi_variant_view
+                gr.update(visible=True),   # seed_controls
+                gr.update(value=help_text) # batch_help
+            )
+    
+    # Connect the batch mode toggle to UI updates
+    enable_batch_mode.change(
+        fn=toggle_batch_mode,
+        inputs=[enable_batch_mode, model_set],
+        outputs=[single_variant_view, multi_variant_view, seed_controls, batch_help]
+    )
+    
+    # Also update when model set changes
+    model_set.change(
+        fn=toggle_batch_mode,
+        inputs=[enable_batch_mode, model_set],
+        outputs=[single_variant_view, multi_variant_view, seed_controls, batch_help]
+    )
+    
     # Connect the generate button to the process function
     generate_btn.click(
         fn=process_audio,
-        inputs=[file_input, start_time, bpm, seed, randomize_seed, model_set, voice_type],
+        inputs=[file_input, start_time, bpm, seed, randomize_seed, model_set, voice_type, enable_batch_mode],
         outputs=[
             status_message, 
             vocal_preview, 
             mixed_preview, 
             midi_preview,
-            beat_mix_preview, 
+            beat_mix_preview,
+            variant2_preview,  # New output for variant 2
+            variant3_preview,  # New output for variant 3
             recent_jobs_list,
             current_job_status
         ]
     )
 
 if __name__ == "__main__":
-    # Launch without share=True to avoid the bug with JSON schema conversion.
-    # Also, binding to "0.0.0.0" lets the container serve the app on all interfaces.
+
     try:
         logger.info("Starting Gradio server...")
         demo.launch(
@@ -890,14 +1184,23 @@ if __name__ == "__main__":
             debug=True,
             show_error=True,
             allowed_paths=[
-                SHARED_DIR,
-                os.path.join(SHARED_DIR, "input"),
-                os.path.join(SHARED_DIR, "melody_results"),
+                SHARED_DIR + "/*",  # Base wildcard
+                "/tmp/melody_generator/*",  # Temp directory for copied files
+                # Add specific paths for all job directories
                 os.path.join(SHARED_DIR, "vocal_results"),
-                os.path.join(SHARED_DIR, "melody_results_set1"),
+                os.path.join(SHARED_DIR, "melody_results"),
                 os.path.join(SHARED_DIR, "vocal_results_set1"),
+                os.path.join(SHARED_DIR, "vocal_results_set2"),
+                os.path.join(SHARED_DIR, "melody_results_set1"),
                 os.path.join(SHARED_DIR, "melody_results_set2"),
-                os.path.join(SHARED_DIR, "vocal_results_set2")
+                # Add wildcards for job subdirectories
+                os.path.join(SHARED_DIR, "vocal_results_set1", "job_*"),
+                os.path.join(SHARED_DIR, "vocal_results_set2", "job_*"),
+                os.path.join(SHARED_DIR, "melody_results_set1", "job_*"),
+                os.path.join(SHARED_DIR, "melody_results_set2", "job_*"),
+                # Add wildcards for variant subdirectories
+                os.path.join(SHARED_DIR, "vocal_results_set1", "job_*", "variant_*"),
+                os.path.join(SHARED_DIR, "vocal_results_set2", "job_*", "variant_*"),
             ],
             prevent_thread_lock=True  # Add this to prevent UI freezing
         )

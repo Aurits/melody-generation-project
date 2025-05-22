@@ -100,7 +100,7 @@ def upload_file(local_file_path, gcp_path):
 def upload_job_files(job_id, shared_dir):
     """
     Upload all files for a specific job to GCP with timestamp in folder name.
-    Handles model-specific directories (set1, set2).
+    Handles model-specific directories (set1, set2) and variant subdirectories.
     
     Args:
         job_id: The job ID
@@ -118,107 +118,74 @@ def upload_job_files(job_id, shared_dir):
         
         # Get model set from job parameters in database
         model_set = "set1"  # Default
+        batch_size = 1      # Default
         try:
             from models import SessionLocal, Job
             session = SessionLocal()
             job = session.query(Job).filter(Job.id == job_id).first()
             if job and job.parameters:
-                params = dict(param.split('=') for param in job.parameters.split(','))
+                params = dict(param.split('=') for param in job.parameters.split(',') if '=' in param)
                 if 'model_set' in params:
                     model_set = params.get('model_set', 'set1')
                     logger.info(f"Found model_set={model_set} in job parameters")
+                if 'batch_size' in params:
+                    batch_size = int(params.get('batch_size', 1))
+                    logger.info(f"Found batch_size={batch_size} in job parameters")
             session.close()
         except Exception as e:
-            logger.error(f"Error getting model_set from database: {str(e)}")
+            logger.error(f"Error getting parameters from database: {str(e)}")
         
         # Define model suffix based on model_set
         model_suffix = f"_{model_set}" if model_set != "" else ""
         
         # Define job-specific directories
         job_input_dir = os.path.join(shared_dir, "input", f"job_{job_id}")
-        
-        # Use model-specific directories for melody and vocal results
         job_melody_dir = os.path.join(shared_dir, f"melody_results{model_suffix}", f"job_{job_id}")
         job_vocal_dir = os.path.join(shared_dir, f"vocal_results{model_suffix}", f"job_{job_id}")
         
-        logger.info(f"Uploading files for job {job_id} with model_set={model_set}")
+        logger.info(f"Uploading files for job {job_id} with model_set={model_set}, batch_size={batch_size}")
         logger.info(f"Looking in directories: {job_input_dir}, {job_melody_dir}, {job_vocal_dir}")
         
         # Upload input files
         input_files = glob.glob(os.path.join(job_input_dir, "*"))
         for input_file in input_files:
-            filename = os.path.basename(input_file)
-            gcp_path = f"{timestamp_folder}/input/{filename}"
-            url = upload_file(input_file, gcp_path)
-            if url:
-                urls[f"input_{filename}"] = url
+            if os.path.isfile(input_file):  # Only upload files, not directories
+                filename = os.path.basename(input_file)
+                gcp_path = f"{timestamp_folder}/input/{filename}"
+                url = upload_file(input_file, gcp_path)
+                if url:
+                    urls[f"input_{filename}"] = url
         
         # Upload melody files - including all files in the directory
         melody_files = glob.glob(os.path.join(job_melody_dir, "*"))
         for melody_file in melody_files:
-            filename = os.path.basename(melody_file)
-            gcp_path = f"{timestamp_folder}/melody/{filename}"
-            url = upload_file(melody_file, gcp_path)
-            if url:
-                urls[f"melody_{filename}"] = url
-                
-        # Also check for melody files that might be in the base melody_results directory
-        base_melody_dir = os.path.join(shared_dir, f"melody_results{model_suffix}")
-        base_melody_files = glob.glob(os.path.join(base_melody_dir, "*"))
-        for melody_file in base_melody_files:
-            # Only upload files, not directories
-            if os.path.isfile(melody_file):
+            if os.path.isfile(melody_file):  # Only upload files, not directories
                 filename = os.path.basename(melody_file)
-                gcp_path = f"{timestamp_folder}/melody/base_{filename}"
+                gcp_path = f"{timestamp_folder}/melody/{filename}"
                 url = upload_file(melody_file, gcp_path)
                 if url:
-                    urls[f"melody_base_{filename}"] = url
+                    urls[f"melody_{filename}"] = url
         
-        # Upload vocal files - including all files in the directory
-        vocal_files = glob.glob(os.path.join(job_vocal_dir, "*"))
-        for vocal_file in vocal_files:
-            filename = os.path.basename(vocal_file)
-            gcp_path = f"{timestamp_folder}/vocal/{filename}"
-            url = upload_file(vocal_file, gcp_path)
-            if url:
-                urls[f"vocal_{filename}"] = url
-                
-        # Also check for vocal files that might be in the base vocal_results directory
-        base_vocal_dir = os.path.join(shared_dir, f"vocal_results{model_suffix}")
-        base_vocal_files = glob.glob(os.path.join(base_vocal_dir, "*"))
-        for vocal_file in base_vocal_files:
-            # Only upload files, not directories
-            if os.path.isfile(vocal_file):
-                filename = os.path.basename(vocal_file)
-                gcp_path = f"{timestamp_folder}/vocal/base_{filename}"
-                url = upload_file(vocal_file, gcp_path)
-                if url:
-                    urls[f"vocal_base_{filename}"] = url
-        
-        # Check if we found any files
-        if not urls:
-            logger.warning(f"No files found for job {job_id} with model_set={model_set}")
-            
-            # If no files were found with the model suffix, try without it (fallback)
-            if model_suffix:
-                logger.info(f"Trying fallback to directories without model suffix")
-                
-                # Try standard directories as fallback
-                job_melody_dir_fallback = os.path.join(shared_dir, "melody_results", f"job_{job_id}")
-                job_vocal_dir_fallback = os.path.join(shared_dir, "vocal_results", f"job_{job_id}")
-                
-                # Upload melody files from fallback directory
-                melody_files = glob.glob(os.path.join(job_melody_dir_fallback, "*"))
-                for melody_file in melody_files:
-                    filename = os.path.basename(melody_file)
-                    gcp_path = f"{timestamp_folder}/melody/{filename}"
-                    url = upload_file(melody_file, gcp_path)
-                    if url:
-                        urls[f"melody_{filename}"] = url
-                
-                # Upload vocal files from fallback directory
-                vocal_files = glob.glob(os.path.join(job_vocal_dir_fallback, "*"))
-                for vocal_file in vocal_files:
+        # Handle vocal files differently based on batch_size
+        if batch_size > 1:
+            # For batch mode, check for variant subdirectories
+            for i in range(1, batch_size + 1):
+                variant_dir = os.path.join(job_vocal_dir, f"variant_{i}")
+                if os.path.exists(variant_dir) and os.path.isdir(variant_dir):
+                    # Upload all files in this variant directory
+                    variant_urls = upload_directory_recursively(
+                        variant_dir, 
+                        f"vocal/variant_{i}", 
+                        timestamp_folder
+                    )
+                    # Add variant URLs to the main URLs dictionary
+                    for key, url in variant_urls.items():
+                        urls[f"variant_{i}_{key}"] = url
+        else:
+            # For single track mode, upload all files in the vocal directory
+            vocal_files = glob.glob(os.path.join(job_vocal_dir, "*"))
+            for vocal_file in vocal_files:
+                if os.path.isfile(vocal_file):  # Only upload files, not directories
                     filename = os.path.basename(vocal_file)
                     gcp_path = f"{timestamp_folder}/vocal/{filename}"
                     url = upload_file(vocal_file, gcp_path)
@@ -230,6 +197,50 @@ def upload_job_files(job_id, shared_dir):
         
     except Exception as e:
         logger.error(f"Error uploading job files: {str(e)}")
+        return urls  # Return whatever was successfully uploaded
+
+def upload_directory_recursively(base_dir, gcp_base_path, timestamp_folder):
+    """
+    Recursively upload all files in a directory and its subdirectories to GCP.
+    
+    Args:
+        base_dir: Base directory to upload
+        gcp_base_path: Base path in GCP bucket
+        timestamp_folder: Timestamp folder name for organizing uploads
+        
+    Returns:
+        Dictionary with file paths and their public URLs
+    """
+    urls = {}
+    
+    try:
+        if not os.path.exists(base_dir):
+            logger.warning(f"Directory not found: {base_dir}")
+            return urls
+            
+        # Walk through all files in the directory and subdirectories
+        for root, dirs, files in os.walk(base_dir):
+            for file in files:
+                # Get the full path to the file
+                file_path = os.path.join(root, file)
+                
+                # Create a relative path from the base directory
+                rel_path = os.path.relpath(file_path, os.path.dirname(base_dir))
+                
+                # Create the GCP path
+                gcp_path = f"{timestamp_folder}/{gcp_base_path}/{rel_path}"
+                
+                # Upload the file
+                url = upload_file(file_path, gcp_path)
+                if url:
+                    # Use the relative path as the key
+                    urls[rel_path] = url
+        
+        logger.info(f"Uploaded {len(urls)} files from directory {base_dir}")
+        return urls
+        
+    except Exception as e:
+        logger.error(f"Error uploading directory {base_dir}: {str(e)}")
         return urls  # Return whatever was successfully uploaded
 
 def upload_job_results(job_id, input_file=None, melody_file=None, vocal_file=None, mixed_file=None):
