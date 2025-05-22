@@ -676,6 +676,20 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                                 variant_mixes[f"variant_{i+1}"] = mix_file
                                 logger.info(f"Found variant mix: {mix_file}")
                 
+                # If still no variants found, try looking for MP3 files specifically
+                if not variant_mixes:
+                    logger.info("No variant mixes found with .wav extension, trying .mp3 files...")
+                    for i in range(1, batch_size + 1):
+                        variant_dir = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", f"variant_{i}")
+                        if os.path.exists(variant_dir):
+                            # Look specifically for MP3 files
+                            for file in os.listdir(variant_dir):
+                                if file.endswith(".mp3") and ("mix" in file.lower() or "melody" in file.lower()):
+                                    mp3_path = os.path.join(variant_dir, file)
+                                    variant_mixes[f"variant_{i}"] = mp3_path
+                                    logger.info(f"Found variant MP3 mix: {mp3_path}")
+                                    break
+                
                 # Look for beat mix file
                 beat_mix_path = os.path.join(SHARED_DIR, f"melody_results_{model_set}", f"job_{job_id}", "beat_mixed_synth_mix.wav")
                 if not os.path.exists(beat_mix_path):
@@ -709,11 +723,11 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                     return (
                         success_message, 
                         None,  # No vocal preview in batch mode
-                        variant1,  # First variant as mixed preview
+                        copy_to_temp(variant1) if variant1 else None,  # First variant as mixed preview
                         None,  # No MIDI preview in batch mode 
-                        beat_mix_path,
-                        variant2,  # Second variant
-                        variant3,  # Third variant
+                        copy_to_temp(beat_mix_path) if beat_mix_path else None,
+                        copy_to_temp(variant2) if variant2 else None,  # Second variant
+                        copy_to_temp(variant3) if variant3 else None,  # Third variant
                         recent_jobs_html, 
                         current_job_status
                     )
