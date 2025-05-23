@@ -723,11 +723,12 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                     return (
                         success_message, 
                         None,  # No vocal preview in batch mode
-                        copy_to_temp(variant1) if variant1 else None,  # First variant as mixed preview
+                        None,  # No mixed preview in batch mode (variants replace this)
                         None,  # No MIDI preview in batch mode 
                         copy_to_temp(beat_mix_path) if beat_mix_path else None,
-                        copy_to_temp(variant2) if variant2 else None,  # Second variant
-                        copy_to_temp(variant3) if variant3 else None,  # Third variant
+                        copy_to_temp(variant1) if variant1 else None,  # variant1_preview
+                        copy_to_temp(variant2) if variant2 else None,  # variant2_preview
+                        copy_to_temp(variant3) if variant3 else None,  # variant3_preview
                         recent_jobs_html, 
                         current_job_status
                     )
@@ -870,6 +871,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                         mixed_path if "mixed" in files_copied else None, 
                         midi_path if "midi" in files_copied else None,
                         beat_mix_path if "beat_mix" in files_copied else None,
+                        None,  # variant1 is None in single track mode
                         None,  # variant2 is None in single track mode
                         None,  # variant3 is None in single track mode
                         recent_jobs_html, 
@@ -1181,8 +1183,9 @@ with gr.Blocks(title="Melody Generator") as demo:
             mixed_preview, 
             midi_preview,
             beat_mix_preview,
-            variant2_preview,  # New output for variant 2
-            variant3_preview,  # New output for variant 3
+            variant1_preview,  # Add variant1_preview
+            variant2_preview,  # variant2_preview
+            variant3_preview,  # variant3_preview
             recent_jobs_list,
             current_job_status
         ]
