@@ -1024,9 +1024,7 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
                             # Add more patterns if needed
                         ]
                         
-                        # Also look for any file with "mix" in the name
-                        for file in os.listdir(variant_dir):
-                            if "mix" in file.lower() and (file.endswith(".wav") or file.endswith(".mp3")):
+                        # Also look for any file with "mix" in file.lower() and (file.endswith(".wav") or file.endswith(".mp3")):
                                 possible_mix_files.append(os.path.join(variant_dir, file))
                         
                         # Check each possible mix file
@@ -1099,20 +1097,18 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
                     copy_to_temp(variant1) if variant1 else None,  # Main melody (no variation)
                     copy_to_temp(variant2) if variant2 else None,  # Alternative 1
                     copy_to_temp(variant3) if variant3 else None,  # Alternative 2
-                    copy_to_temp(beat_mix_path) if beat_mix_path else None,
-                    recent_jobs_html, 
-                    current_job_status
+                    copy_to_temp(beat_mix_path) if beat_mix_path else None
                 )
             else:
                 error_message = f"⚠️ Job completed but no variant files found (Job ID: {job_id})"
-                return error_message, None, None, None, None, get_recent_jobs(), get_current_job_status()
+                return error_message, None, None, None, None
         else:
             error_message = f"⚠️ Job {status} (Job ID: {job_id})"
-            return error_message, None, None, None, None, get_recent_jobs(), get_current_job_status()
+            return error_message, None, None, None, None
 
     except Exception as e:
         logger.error(f"Error generating melodies with seed variation: {str(e)}", exc_info=True)
-        return f"❌ Error: {str(e)}", None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return f"❌ Error: {str(e)}", None, None, None, None
 
 # Function to randomize the base seed value
 def randomize_base_seed_value():
@@ -1439,7 +1435,8 @@ with gr.Blocks(title="Melody Generator") as demo:
                             show_download_button=True,
                         )
             
-       
+            
+        
         # Recent Jobs tab
         with gr.TabItem("Recent Jobs"):
             gr.Markdown("### Recent Jobs")
@@ -1562,9 +1559,7 @@ with gr.Blocks(title="Melody Generator") as demo:
             main_melody_preview,
             alt1_preview,
             alt2_preview,
-            sv_beat_mix_preview,
-            sv_recent_jobs_list,
-            sv_current_job_status
+            sv_beat_mix_preview
         ]
     )
 
