@@ -1183,7 +1183,7 @@ with gr.Blocks(title="Melody Generator") as demo:
             mixed_preview, 
             midi_preview,
             beat_mix_preview,
-            variant1_preview,  # Add variant1_preview
+            variant1_preview,  # variant1_preview
             variant2_preview,  # variant2_preview
             variant3_preview,  # variant3_preview
             recent_jobs_list,
