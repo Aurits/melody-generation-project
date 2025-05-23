@@ -1025,7 +1025,7 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
                         ]
                         
                         # Also look for any file with "mix" in file.lower() and (file.endswith(".wav") or file.endswith(".mp3")):
-                                possible_mix_files.append(os.path.join(variant_dir, file))
+                        possible_mix_files.append(os.path.join(variant_dir, file))
                         
                         # Check each possible mix file
                         for mix_file in possible_mix_files:
