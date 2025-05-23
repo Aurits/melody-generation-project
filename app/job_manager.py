@@ -13,6 +13,9 @@ import json
 # Set up logging
 logger = logging.getLogger(__name__)
 
+# Add this to your job_manager.py file to handle seed variation parameters
+
+# Inside the process_job function, update the parameter parsing section:
 def process_job(job_id, checkpoint, gen_seed, shared_dir):
     """
     Process a single job by ID.
@@ -41,6 +44,9 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
         model_set = "set1"   # Default to set1
         sex = "female"       # Default to female voice
         batch_size = 1       # Default to single track
+        seed_perturb_algorithm = None  # Default to None (not used)
+        seed_perturb_ratios = None     # Default to None (not used)
+        seeds = None                   # Default to None (will be set based on job_seed)
         
         if job.parameters:
             params = dict(param.split('=') for param in job.parameters.split(',') if '=' in param)
@@ -51,7 +57,14 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             if 'seed' in params:
                 job_seed = int(float(params.get('seed', gen_seed)))
                 logger.info(f"Using job-specific seed: {job_seed}")
-                
+            
+            # Extract base_seed if available (for seed variation mode)
+            if 'base_seed' in params:
+                base_seed = int(float(params.get('base_seed', gen_seed)))
+                logger.info(f"Using base seed: {base_seed}")
+                # If base_seed is specified, use it as job_seed
+                job_seed = base_seed
+            
             # Extract model_set if available
             if 'model_set' in params:
                 model_set = params.get('model_set', 'set1')
@@ -66,6 +79,45 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             if 'batch_size' in params:
                 batch_size = int(params.get('batch_size', 1))
                 logger.info(f"Using batch size: {batch_size}")
+            
+            # Extract seed_perturb_algorithm if available
+            if 'seed_perturb_algorithm' in params:
+                seed_perturb_algorithm = params.get('seed_perturb_algorithm')
+                logger.info(f"Using seed_perturb_algorithm: {seed_perturb_algorithm}")
+            
+            # Extract seed_perturb_ratios if available
+            if 'seed_perturb_ratios' in params:
+                try:
+                    # Handle both comma-separated string and single value
+                    ratios_str = params.get('seed_perturb_ratios')
+                    if ',' in ratios_str:
+                        seed_perturb_ratios = [float(r) for r in ratios_str.split(',')]
+                    else:
+                        # If it's a single value, create a list with the same value repeated batch_size times
+                        seed_perturb_ratios = [float(ratios_str)] * batch_size
+                    logger.info(f"Using seed_perturb_ratios: {seed_perturb_ratios}")
+                except Exception as e:
+                    logger.error(f"Error parsing seed_perturb_ratios: {str(e)}")
+            
+            # Extract variation_param if available (for seed variation mode)
+            if 'variation_param' in params:
+                variation_param = float(params.get('variation_param', 0.5))
+                logger.info(f"Using variation parameter: {variation_param}")
+                
+                # If variation_param is specified, set up seed_perturb_ratios
+                if seed_perturb_ratios is None and batch_size > 1:
+                    seed_perturb_ratios = [0.0] + [variation_param] * (batch_size - 1)
+                    logger.info(f"Set up seed_perturb_ratios from variation_param: {seed_perturb_ratios}")
+                
+                # If seed_perturb_algorithm is not specified, use "tail"
+                if seed_perturb_algorithm is None:
+                    seed_perturb_algorithm = "tail"
+                    logger.info(f"Set seed_perturb_algorithm to 'tail' for seed variation mode")
+        
+        # Set up seeds list if using seed variation mode
+        if batch_size > 1 and seed_perturb_ratios is not None:
+            seeds = [job_seed] * batch_size
+            logger.info(f"Set up seeds list for seed variation mode: {seeds}")
         
         # Check if the input file exists
         if not os.path.exists(job.input_file):
@@ -77,6 +129,19 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             
         # Run the complete song processing (melody generation and vocal mix)
         logger.info(f"Calling process_song with input file: {job.input_file}, model_set: {model_set}, batch_size: {batch_size}")
+        
+        # Add seed variation parameters if they are set
+        additional_params = {}
+        if seeds is not None:
+            additional_params['seeds'] = seeds
+        if seed_perturb_algorithm is not None:
+            additional_params['seed_perturb_algorithm'] = seed_perturb_algorithm
+        if seed_perturb_ratios is not None:
+            additional_params['seed_perturb_ratios'] = seed_perturb_ratios
+        
+        if additional_params:
+            logger.info(f"Additional parameters for seed variation: {additional_params}")
+        
         result = process_song(
             shared_dir=shared_dir, 
             input_bgm=job.input_file, 
@@ -87,9 +152,10 @@ def process_job(job_id, checkpoint, gen_seed, shared_dir):
             bpm=bpm,
             model_set=model_set,
             sex=sex,
-            batch_size=batch_size
+            batch_size=batch_size,
+            **additional_params  # Pass additional parameters for seed variation
         )
-        
+
         # Handle different return values based on batch_size
         if batch_size > 1:
             # In batch mode, result is a tuple (list_of_final_mixes, beat_mix_file)

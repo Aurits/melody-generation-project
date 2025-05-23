@@ -393,7 +393,7 @@ def mix_vocals_with_package(original_bgm, melody_file, output_dir, sex="female")
         logger.error(f"Error mixing vocals with package: {str(e)}", exc_info=True)
         raise
 
-def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0, model_set="set1", sex="female", batch_size=1):
+def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start_time=0, bpm=0, model_set="set1", sex="female", batch_size=1, seeds=None, seed_perturb_algorithm=None, seed_perturb_ratios=None):
     """
     Orchestrates the complete workflow:
       1. Runs melody generation.
@@ -411,6 +411,9 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         model_set: Which model set to use ('set1' or 'set2', defaults to 'set1')
         sex: Voice type to use ("female" or "male")
         batch_size: Number of melodies to generate in parallel (default: 1)
+        seeds: List of seeds to use for each batch item (default: None)
+        seed_perturb_algorithm: Algorithm to use for seed perturbation (default: None)
+        seed_perturb_ratios: List of ratios to use for seed perturbation (default: None)
         
     Returns:
         If batch_size=1: (final_mix_path, beat_mix_file_path)
@@ -431,7 +434,7 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
         
         # Determine which approach to use based on model_set
         if model_set == 'set2':
-            # Check requirements - same as before
+            # Check requirements
             melody_gen_installed = importlib.util.find_spec("melody_generation") is not None
             vocalmix_installed = importlib.util.find_spec("vocalmix") is not None
             sdk_exists = os.path.exists("/app/dreamtonics_sdk")
@@ -455,37 +458,95 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                 logger.info(f"Processing song: {input_bgm} for job {job_id} using model set {model_set} (Python packages)")
                 logger.info(f"Parameters: start_time={start_time}, bpm={bpm}, seed={gen_seed}, sex={sex}, batch_size={batch_size}")
                 
+                # Log seed variation parameters if provided
+                if seeds is not None:
+                    logger.info(f"Using custom seeds: {seeds}")
+                if seed_perturb_algorithm is not None:
+                    logger.info(f"Using seed_perturb_algorithm: {seed_perturb_algorithm}")
+                if seed_perturb_ratios is not None:
+                    logger.info(f"Using seed_perturb_ratios: {seed_perturb_ratios}")
+                
                 # Use the checkpoint path from environment variable
                 checkpoint_to_use = model_checkpoint_path
                 
                 # Generate melody (or melodies) using the Python package
                 try:
-                    melody_files = generate_melody_with_package(
-                        input_bgm=input_bgm,
-                        checkpoint=checkpoint_to_use,
-                        gen_seed=gen_seed,
-                        output_dir=melody_output_dir,
-                        start_time=start_time,
-                        bpm=bpm,
-                        batch_size=batch_size
+                    # Import required modules
+                    from melody_generation.infer import create_model
+                    import melody_generation.beat_estimation.downbeat_estimation as dbe
+                    
+                    # Create the model
+                    gen_model = create_model(
+                        checkpoint_path=pathlib.Path(checkpoint_to_use),
+                        config_path=pathlib.Path(f"{model_config_path}")
                     )
+                    
+                    # Create beat estimation model
+                    dbe_model = dbe.create_model()
+                    
+                    # Handle beat estimation
+                    if start_time > 0 or bpm > 0:
+                        # Manual beat estimation
+                        if start_time > 0 and bpm > 0:
+                            dbe_res = dbe_model.estimate(
+                                audio_filepath=pathlib.Path(input_bgm),
+                                start_time=start_time,
+                                bpm=bpm,
+                                auto_estimate=False
+                            )
+                        else:
+                            # Only BPM is specified
+                            dbe_res = dbe_model.estimate(
+                                audio_filepath=pathlib.Path(input_bgm),
+                                start_time=0,
+                                bpm=bpm,
+                                auto_estimate=False
+                            )
+                    else:
+                        # Automatic beat estimation
+                        dbe_res = dbe_model.estimate(audio_filepath=pathlib.Path(input_bgm))
+                    
+                    # Generate beat mix for visualization
+                    beat_mix_path = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
+                    try:
+                        dbe.make_clicked_audio_by_beat_times_and_countings(
+                            audio_filepath=pathlib.Path(input_bgm),
+                            beat_times_and_countings=dbe_res,
+                            save_path=pathlib.Path(beat_mix_path)
+                        )
+                        logger.info(f"Created beat mix visualization at: {beat_mix_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create beat mix visualization: {str(e)}")
+                    
+                    # Prepare parameters for melody generation
+                    infer_params = {
+                        'accompaniment_audio_filepath': pathlib.Path(input_bgm),
+                        'beat_times_and_countings_filepath': dbe_res,
+                        'batch_size': batch_size,
+                        'save_dir': pathlib.Path(melody_output_dir),
+                        'save_synth_demo': False  # Don't save synth demo for seed variation mode
+                    }
+                    
+                    # Add seed variation parameters if provided
+                    if seeds is not None:
+                        infer_params['seeds'] = seeds
+                    if seed_perturb_algorithm is not None:
+                        infer_params['seed_perturb_algorithm'] = seed_perturb_algorithm
+                    if seed_perturb_ratios is not None:
+                        infer_params['seed_perturb_ratios'] = seed_perturb_ratios
+                    
+                    # Generate melody
+                    melody_files = gen_model.infer(**infer_params)
+                    
+                    # Ensure melody_files is a list
+                    if not isinstance(melody_files, list):
+                        melody_files = [melody_files]
+                    
+                    logger.info(f"Generated {len(melody_files)} melody files successfully")
+                    
                 except Exception as e:
                     logger.error(f"Failed to generate melodies with package: {str(e)}")
                     raise
-                
-                # Ensure melody_files is a list even if only one file is returned
-                if not isinstance(melody_files, list):
-                    melody_files = [melody_files]
-                
-                logger.info(f"Generated {len(melody_files)} melody files successfully")
-                
-                # Check for beat_mixed_synth_mix.wav file
-                beat_mix_file = os.path.join(melody_output_dir, "beat_mixed_synth_mix.wav")
-                if os.path.exists(beat_mix_file):
-                    logger.info(f"Found beat mix file at: {beat_mix_file}")
-                else:
-                    logger.warning(f"Beat mix file not found at: {beat_mix_file}")
-                    beat_mix_file = None
                 
                 # Process each melody file separately
                 final_mixes = []
@@ -497,8 +558,9 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                     logger.info(f"Processing melody variant {i+1}: {melody_file}")
                     
                     try:
-                        # Generate "la" syllables for vocals according to the documentation
+                        # Generate vocals using vocalmix
                         from vocalmix.fuwari.core import get_notes_num, make_all_same_char_fuwarare
+                        from vocalmix.core import vocalmix
                         
                         # Get the number of notes in the melody
                         notes_num = get_notes_num(midi_filepath=pathlib.Path(melody_file))
@@ -506,9 +568,7 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                         # Create a fuwarare file with all "ら" characters
                         path_to_fuwarare = make_all_same_char_fuwarare(notes_num=notes_num, char="ら")
                         
-                        # Generate vocals using vocalmix
-                        from vocalmix.core import vocalmix
-                        
+                        # Generate vocals
                         paths = vocalmix(
                             bgm_filepath=pathlib.Path(input_bgm),
                             melody_filepath=pathlib.Path(melody_file),
@@ -544,14 +604,13 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                 
                 # If batch_size is 1, return the single result as before
                 if batch_size == 1 and len(final_mixes) > 0:
-                    return final_mixes[0], beat_mix_file
+                    return final_mixes[0], beat_mix_path
                 else:
                     # Otherwise return the list of all final mixes
-                    return final_mixes, beat_mix_file
+                    return final_mixes, beat_mix_path
                     
             else:
                 # Some requirements are not met, fall back to model set 1
-                # (Fallback code same as before)
                 missing_requirements = []
                 if not melody_gen_installed:
                     missing_requirements.append("melody_generation package")
@@ -581,7 +640,7 @@ def process_song(shared_dir, input_bgm, checkpoint, gen_seed, job_id=None, start
                 os.makedirs(vocal_output_dir, exist_ok=True)
         
         # If model_set is 'set1' or we've fallen back to it
-        # This code doesn't support batch processing, so batch_size is ignored
+        # This code doesn't support seed variation parameters, so they are ignored
         melody_container = "melody-generation-set1"
         vocal_container = "vocal-mix-set1"
         

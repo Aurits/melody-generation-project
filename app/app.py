@@ -520,13 +520,13 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
     
     if file is None:
         logger.warning("Job submission attempted with no file")
-        return "⚠️ Please upload a backing track first", None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return "⚠️ Please upload a backing track first", None, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
     
     # Validate inputs
     if start_time > 0 and (not bpm or bpm <= 0):
         error = "If start_time is greater than 0, BPM must also be greater than 0."
         logger.warning(error)
-        return error, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return error, None, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
     
     try:
         progress(0, "Initializing...")
@@ -734,7 +734,7 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                     )
                 else:
                     error_message = f"⚠️ Job completed but no variant files found (Job ID: {job_id})"
-                    return error_message, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+                    return error_message, None, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
             
             else:
                 # Original single track processing logic
@@ -879,15 +879,243 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                     )
                 else:
                     error_message = f"⚠️ Job completed but essential files are missing (Job ID: {job_id})"
-                    return error_message, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+                    return error_message, None, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
 
     except Exception as e:
         logger.error(f"Error generating melodies: {str(e)}", exc_info=True)
-        return f"❌ Error: {str(e)}", None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return (
+            f"❌ Error: {str(e)}", 
+            None, None, None, None, None, None, None,  # 7 None values for audio/file outputs
+            get_recent_jobs(), 
+            get_current_job_status()
+        )
 
 
 # Function to randomize the seed value
 def randomize_seed_value():
+    import random
+    new_seed = random.randint(0, 10000)
+    return gr.update(value=new_seed)
+
+# New function for seed variation feature
+def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variation_param, model_set, voice_type, progress=gr.Progress()):
+    global current_job_id
+    
+    if file is None:
+        logger.warning("Job submission attempted with no file")
+        return "⚠️ Please upload a backing track first", None, None, None, None, get_recent_jobs(), get_current_job_status()
+    
+    # Validate inputs
+    if start_time > 0 and (not bpm or bpm <= 0):
+        error = "If start_time is greater than 0, BPM must also be greater than 0."
+        logger.warning(error)
+        return error, None, None, None, None, get_recent_jobs(), get_current_job_status()
+    
+    try:
+        progress(0, "Initializing...")
+        
+        # Always use batch size 3 for seed variation mode
+        batch_size = 3
+        
+        # Use the same base seed for all three tracks
+        seeds = [base_seed, base_seed, base_seed]
+        
+        # Set up seed_perturb_ratios: first track has 0.0, others use the variation parameter
+        seed_perturb_ratios = [0.0, variation_param, variation_param]
+        
+        # Always use "tail" algorithm for better stability
+        seed_perturb_algorithm = "tail"
+        
+        # Create a new job record in the database first to get the job ID
+        session = SessionLocal()
+        job = Job(
+            status="pending",
+            parameters=f"start_time={start_time},bpm={bpm},base_seed={base_seed},variation_param={variation_param},model_set={model_set},sex={voice_type},batch_size={batch_size},seed_perturb_algorithm={seed_perturb_algorithm},seed_perturb_ratios={','.join(map(str, seed_perturb_ratios))}"
+        )
+        session.add(job)
+        session.commit()
+        job_id = job.id
+        current_job_id = job_id  # Set the global current job ID
+        logger.info(f"Created job {job_id} with model_set={model_set}, voice_type={voice_type}, batch_size={batch_size}")
+        logger.info(f"Seed variation parameters: base_seed={base_seed}, variation_param={variation_param}, seed_perturb_algorithm={seed_perturb_algorithm}")
+        
+        # Create job-specific directories
+        job_input_dir, job_melody_dir, job_vocal_dir = create_job_directories(job_id)
+        
+        # Process the input file
+        progress(0.1, "Processing audio file...")
+        
+        # Fix for the file.name error - handle both string paths and file objects
+        if isinstance(file, str):
+            original_filename = os.path.basename(file)
+        else:
+            original_filename = os.path.basename(file.name)
+            
+        # Remove file extension for use in output filenames
+        input_filename_base, input_ext = os.path.splitext(original_filename)
+        
+        # Create job-specific input filename
+        job_input_filename = f"job_{job_id}_{input_filename_base}{input_ext}"
+        file_path = os.path.join(job_input_dir, job_input_filename)
+        
+        # Handle both string paths and file objects
+        if isinstance(file, str):
+            # If file is already a path, just copy it
+            shutil.copy2(file, file_path)
+        else:
+            # Otherwise read and write the file
+            with open(file_path, "wb") as f:
+                f.write(file.read())
+        
+        logger.info(f"File saved to {file_path}")
+        
+        # Verify the file exists and has content
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Failed to save file to {file_path}")
+            
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            raise ValueError(f"Saved file is empty: {file_path}")
+            
+        logger.info(f"File saved successfully: {file_path} ({file_size} bytes)")
+        
+        # Update the job with the input file path
+        session = SessionLocal()
+        job = session.query(Job).filter(Job.id == job_id).first()
+        job.input_file = file_path
+        session.commit()
+        session.close()
+        
+        # Update the recent jobs display
+        recent_jobs_html = get_recent_jobs()
+        current_job_status = get_current_job_status()
+        
+        # Poll for job completion
+        progress(0.3, f"Job submitted (ID: {job_id}). Waiting for processing...")
+        output_file, status = poll_job_status(job_id, progress)
+
+        # Process the results
+        if status == "completed":
+            # Get variant mix paths from job parameters
+            session = SessionLocal()
+            job = session.query(Job).filter(Job.id == job_id).first()
+            
+            variant_mixes = {}
+            if job and job.variant_mixes_json:
+                try:
+                    variant_mixes = json.loads(job.variant_mixes_json)
+                    logger.info(f"Found variant mixes in job.variant_mixes_json: {list(variant_mixes.keys())}")
+                except Exception as e:
+                    logger.error(f"Error parsing variant_mixes_json: {str(e)}")
+            
+            # If no variants were found in the JSON column, try to find them based on directory structure
+            if not variant_mixes:
+                logger.info("No variant mixes found in job.variant_mixes_json, searching directories...")
+                model_suffix = f"_{model_set}"
+                
+                # Search for variant directories and files
+                for i in range(1, batch_size + 1):
+                    variant_dir = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", f"variant_{i}")
+                    if os.path.exists(variant_dir):
+                        # Look for mix files with different possible names
+                        possible_mix_files = [
+                            os.path.join(variant_dir, "mix.wav"),
+                            os.path.join(variant_dir, "mix.mp3"),
+                            # Add more patterns if needed
+                        ]
+                        
+                        # Also look for any file with "mix" in the name
+                        for file in os.listdir(variant_dir):
+                            if "mix" in file.lower() and (file.endswith(".wav") or file.endswith(".mp3")):
+                                possible_mix_files.append(os.path.join(variant_dir, file))
+                        
+                        # Check each possible mix file
+                        for mix_file in possible_mix_files:
+                            if os.path.exists(mix_file):
+                                variant_mixes[f"variant_{i}"] = mix_file
+                                logger.info(f"Found variant mix: {mix_file}")
+                                break
+            
+            session.close()
+       
+            # If no variants were found, try to find them based on directory structure
+            if not variant_mixes:
+                logger.info("No variant mixes found in job parameters, searching directories...")
+                model_suffix = f"_{model_set}"
+                for i in range(batch_size):
+                    variant_dir = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", f"variant_{i+1}")
+                    if os.path.exists(variant_dir):
+                        mix_file = os.path.join(variant_dir, "mix.wav")
+                        if os.path.exists(mix_file):
+                            variant_mixes[f"variant_{i+1}"] = mix_file
+                            logger.info(f"Found variant mix: {mix_file}")
+            
+            # If still no variants found, try looking for MP3 files specifically
+            if not variant_mixes:
+                logger.info("No variant mixes found with .wav extension, trying .mp3 files...")
+                for i in range(1, batch_size + 1):
+                    variant_dir = os.path.join(SHARED_DIR, f"vocal_results{model_suffix}", f"job_{job_id}", f"variant_{i}")
+                    if os.path.exists(variant_dir):
+                        # Look specifically for MP3 files
+                        for file in os.listdir(variant_dir):
+                            if file.endswith(".mp3") and ("mix" in file.lower() or "melody" in file.lower()):
+                                mp3_path = os.path.join(variant_dir, file)
+                                variant_mixes[f"variant_{i}"] = mp3_path
+                                logger.info(f"Found variant MP3 mix: {mp3_path}")
+                                break
+            
+            # Look for beat mix file
+            beat_mix_path = os.path.join(SHARED_DIR, f"melody_results_{model_set}", f"job_{job_id}", "beat_mixed_synth_mix.wav")
+            if not os.path.exists(beat_mix_path):
+                beat_mix_path = None
+                
+                # Try alternative locations
+                alternative_beat_mix_paths = [
+                    os.path.join(SHARED_DIR, f"melody_results_{model_set}", "beat_mixed_synth_mix.wav"),
+                    os.path.join(SHARED_DIR, f"melody_results", f"job_{job_id}", "beat_mixed_synth_mix.wav")
+                ]
+                
+                for path in alternative_beat_mix_paths:
+                    if os.path.exists(path):
+                        beat_mix_path = path
+                        logger.info(f"Found beat mix file at alternative location: {beat_mix_path}")
+                        break
+            
+            # Prepare the variants for display
+            variant1 = variant_mixes.get("variant_1", None)
+            variant2 = variant_mixes.get("variant_2", None)
+            variant3 = variant_mixes.get("variant_3", None)
+            
+            if variant1 or variant2 or variant3:
+                success_message = f"✅ Generated melody variations with base seed {base_seed} and variation {variation_param}! (Job ID: {job_id})"
+                
+                # Update recent jobs display and current job status
+                recent_jobs_html = get_recent_jobs()
+                current_job_status = get_current_job_status()
+                
+                # Return the variants for display
+                return (
+                    success_message, 
+                    copy_to_temp(variant1) if variant1 else None,  # Main melody (no variation)
+                    copy_to_temp(variant2) if variant2 else None,  # Alternative 1
+                    copy_to_temp(variant3) if variant3 else None,  # Alternative 2
+                    copy_to_temp(beat_mix_path) if beat_mix_path else None,
+                    recent_jobs_html, 
+                    current_job_status
+                )
+            else:
+                error_message = f"⚠️ Job completed but no variant files found (Job ID: {job_id})"
+                return error_message, None, None, None, None, get_recent_jobs(), get_current_job_status()
+        else:
+            error_message = f"⚠️ Job {status} (Job ID: {job_id})"
+            return error_message, None, None, None, None, get_recent_jobs(), get_current_job_status()
+
+    except Exception as e:
+        logger.error(f"Error generating melodies with seed variation: {str(e)}", exc_info=True)
+        return f"❌ Error: {str(e)}", None, None, None, None, get_recent_jobs(), get_current_job_status()
+
+# Function to randomize the base seed value
+def randomize_base_seed_value():
     import random
     new_seed = random.randint(0, 10000)
     return gr.update(value=new_seed)
@@ -1089,6 +1317,129 @@ with gr.Blocks(title="Melody Generator") as demo:
                             show_download_button=True,
                         )
         
+        # Seed Variation tab (new)
+        with gr.TabItem("Seed Variation"):
+            gr.Markdown("### Generate Similar Melodies from a Base Seed")
+            gr.Markdown(
+                "This feature allows you to generate multiple melody variations based on a single seed. "
+                "The first track uses the exact seed, while the other tracks apply a variation parameter to create similar but different melodies."
+            )
+            
+            with gr.Row():
+                # Left column - Input controls
+                with gr.Column():
+                    gr.Markdown("### Input")
+                    seed_variation_file_input = gr.Audio(
+                        label="Upload Backing Track (WAV)",
+                        type="filepath"
+                    )
+                    
+                    with gr.Accordion("Melody Settings", open=True):
+                        with gr.Row():
+                            base_seed = gr.Number(
+                                label="Base Seed",
+                                value=42,
+                                precision=0,
+                                interactive=True
+                            )
+                            
+                            randomize_base_seed_btn = gr.Button("Random Seed")
+                        
+                        variation_param = gr.Slider(
+                            label="Variation Parameter",
+                            minimum=0.0,
+                            maximum=1.0,
+                            value=0.5,
+                            step=0.1,
+                            interactive=True
+                        )
+                        
+                        gr.Markdown(
+                            """
+                            **Variation Parameter Guide:**
+                            - 0.1: Almost no change
+                            - 0.3: Minimal changes
+                            - 0.5: Slight variations
+                            - 0.7: Moderate changes
+                            - 0.9: Significant rhythm pattern changes
+                            """
+                        )
+                    
+                    with gr.Accordion("Advanced Settings", open=False):
+                        with gr.Row():
+                            sv_start_time = gr.Number(
+                                label="Song start time (seconds)",
+                                value=0,
+                                precision=2,
+                                interactive=True
+                            )
+                            
+                            sv_bpm = gr.Number(
+                                label="BPM (integer)",
+                                value=0,
+                                precision=0,
+                                interactive=True
+                            )
+                        
+                        sv_voice_type = gr.Radio(
+                            label="Voice Type",
+                            choices=["female", "male"],
+                            value="female",
+                            interactive=True
+                        )
+                    
+                    sv_status_message = gr.Markdown("Upload a track, set parameters, and click Generate.")
+                    sv_generate_btn = gr.Button("Generate Melody Variations", variant="primary", size="lg")
+                
+                # Right column - Preview outputs
+                with gr.Column():
+                    gr.Markdown("### Melody Variations")
+                    
+                    with gr.Group():
+                        gr.Markdown("#### Main Melody (Base Seed)")
+                        main_melody_preview = gr.Audio(
+                            label="Main Melody",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=False,
+                            show_download_button=True,
+                        )
+                    
+                    with gr.Group():
+                        gr.Markdown("#### Alternative 1")
+                        alt1_preview = gr.Audio(
+                            label="Alternative 1",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=False,
+                            show_download_button=True,
+                        )
+                    
+                    with gr.Group():
+                        gr.Markdown("#### Alternative 2")
+                        alt2_preview = gr.Audio(
+                            label="Alternative 2",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=False,
+                            show_download_button=True,
+                        )
+                    
+                    with gr.Group():
+                        gr.Markdown("#### Beat Detection")
+                        sv_beat_mix_preview = gr.Audio(
+                            label="Beat Detection Mix",
+                            type="filepath",
+                            value=None, 
+                            interactive=False,
+                            autoplay=False,
+                            show_download_button=True,
+                        )
+            
+       
         # Recent Jobs tab
         with gr.TabItem("Recent Jobs"):
             gr.Markdown("### Recent Jobs")
@@ -1188,6 +1539,32 @@ with gr.Blocks(title="Melody Generator") as demo:
             variant3_preview,  # variant3_preview
             recent_jobs_list,
             current_job_status
+        ]
+    )
+    
+    # Connect the randomize button to the function for seed variation
+    randomize_base_seed_btn.click(fn=randomize_base_seed_value, outputs=base_seed)
+    
+    # Connect the seed variation generate button to the process function
+    sv_generate_btn.click(
+        fn=process_audio_with_seed_variation,
+        inputs=[
+            seed_variation_file_input, 
+            sv_start_time, 
+            sv_bpm, 
+            base_seed, 
+            variation_param, 
+            gr.State("set2"),  # Always use the new model (set2)
+            sv_voice_type
+        ],
+        outputs=[
+            sv_status_message,
+            main_melody_preview,
+            alt1_preview,
+            alt2_preview,
+            sv_beat_mix_preview,
+            sv_recent_jobs_list,
+            sv_current_job_status
         ]
     )
 
