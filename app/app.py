@@ -69,19 +69,27 @@ except Exception as e:
 # -------------------- 
 def create_job_directories(job_id):
     """Create job-specific directories for input, melody, and vocal results"""
-    # Create job-specific directories
+    # Create job-specific directories for both model sets
     job_input_dir = os.path.join(SHARED_DIR, "input", f"job_{job_id}")
-    job_melody_dir = os.path.join(SHARED_DIR, "melody_results", f"job_{job_id}")
-    job_vocal_dir = os.path.join(SHARED_DIR, "vocal_results", f"job_{job_id}")
+    
+    # Create directories for both model sets to avoid issues later
+    job_melody_dir_set1 = os.path.join(SHARED_DIR, "melody_results_set1", f"job_{job_id}")
+    job_vocal_dir_set1 = os.path.join(SHARED_DIR, "vocal_results_set1", f"job_{job_id}")
+    job_melody_dir_set2 = os.path.join(SHARED_DIR, "melody_results_set2", f"job_{job_id}")
+    job_vocal_dir_set2 = os.path.join(SHARED_DIR, "vocal_results_set2", f"job_{job_id}")
     
     # Create directories if they don't exist
     os.makedirs(job_input_dir, exist_ok=True)
-    os.makedirs(job_melody_dir, exist_ok=True)
-    os.makedirs(job_vocal_dir, exist_ok=True)
+    os.makedirs(job_melody_dir_set1, exist_ok=True)
+    os.makedirs(job_vocal_dir_set1, exist_ok=True)
+    os.makedirs(job_melody_dir_set2, exist_ok=True)
+    os.makedirs(job_vocal_dir_set2, exist_ok=True)
     
     logger.info(f"Created job directories for job {job_id}")
     
-    return job_input_dir, job_melody_dir, job_vocal_dir
+    # Return the basic directories (the calling code will determine which model set to use)
+    return job_input_dir, job_melody_dir_set1, job_vocal_dir_set1
+
 
 def calculate_job_duration(job):
     """Calculate the duration of a job in seconds"""
@@ -729,12 +737,14 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                         copy_to_temp(variant1) if variant1 else None,  # variant1_preview
                         copy_to_temp(variant2) if variant2 else None,  # variant2_preview
                         copy_to_temp(variant3) if variant3 else None,  # variant3_preview
+                        copy_to_temp(beat_mix_path) if beat_mix_path else None,  # batch_beat_mix_preview - ADD THIS
                         recent_jobs_html, 
                         current_job_status
                     )
                 else:
                     error_message = f"⚠️ Job completed but no variant files found (Job ID: {job_id})"
                     return error_message, None, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+
             
             else:
                 # Original single track processing logic
@@ -874,18 +884,19 @@ def process_audio(file, start_time, bpm, seed, randomize_seed, model_set, voice_
                         None,  # variant1 is None in single track mode
                         None,  # variant2 is None in single track mode
                         None,  # variant3 is None in single track mode
+                        None,  # batch_beat_mix_preview is None in single track mode - ADD THIS
                         recent_jobs_html, 
                         current_job_status
                     )
                 else:
                     error_message = f"⚠️ Job completed but essential files are missing (Job ID: {job_id})"
-                    return error_message, None, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
+                    return error_message, None, None, None, None, None, None, None, None, get_recent_jobs(), get_current_job_status()
 
     except Exception as e:
         logger.error(f"Error generating melodies: {str(e)}", exc_info=True)
         return (
             f"❌ Error: {str(e)}", 
-            None, None, None, None, None, None, None,  # 7 None values for audio/file outputs
+            None, None, None, None, None, None, None, None,  # 7 None values for audio/file outputs
             get_recent_jobs(), 
             get_current_job_status()
         )
@@ -897,19 +908,20 @@ def randomize_seed_value():
     new_seed = random.randint(0, 10000)
     return gr.update(value=new_seed)
 
+
 # New function for seed variation feature
 def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variation_param, model_set, voice_type, progress=gr.Progress()):
     global current_job_id
     
     if file is None:
         logger.warning("Job submission attempted with no file")
-        return "⚠️ Please upload a backing track first", None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return "⚠️ Please upload a backing track first", None, None, None, None
     
     # Validate inputs
     if start_time > 0 and (not bpm or bpm <= 0):
         error = "If start_time is greater than 0, BPM must also be greater than 0."
         logger.warning(error)
-        return error, None, None, None, None, get_recent_jobs(), get_current_job_status()
+        return error, None, None, None, None
     
     try:
         progress(0, "Initializing...")
@@ -935,7 +947,7 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
         session.add(job)
         session.commit()
         job_id = job.id
-        current_job_id = job_id  # Set the global current job ID
+        current_job_id = job_id
         logger.info(f"Created job {job_id} with model_set={model_set}, voice_type={voice_type}, batch_size={batch_size}")
         logger.info(f"Seed variation parameters: base_seed={base_seed}, variation_param={variation_param}, seed_perturb_algorithm={seed_perturb_algorithm}")
         
@@ -986,10 +998,6 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
         session.commit()
         session.close()
         
-        # Update the recent jobs display
-        recent_jobs_html = get_recent_jobs()
-        current_job_status = get_current_job_status()
-        
         # Poll for job completion
         progress(0.3, f"Job submitted (ID: {job_id}). Waiting for processing...")
         output_file, status = poll_job_status(job_id, progress)
@@ -1021,11 +1029,12 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
                         possible_mix_files = [
                             os.path.join(variant_dir, "mix.wav"),
                             os.path.join(variant_dir, "mix.mp3"),
-                            # Add more patterns if needed
                         ]
                         
-                        # Also look for any file with "mix" in file.lower() and (file.endswith(".wav") or file.endswith(".mp3")):
-                        possible_mix_files.append(os.path.join(variant_dir, file))
+                        # FIXED: Also look for any file with "mix" in the name
+                        for file in os.listdir(variant_dir):
+                            if "mix" in file.lower() and (file.endswith(".wav") or file.endswith(".mp3")):
+                                possible_mix_files.append(os.path.join(variant_dir, file))
                         
                         # Check each possible mix file
                         for mix_file in possible_mix_files:
@@ -1062,22 +1071,28 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
                                 logger.info(f"Found variant MP3 mix: {mp3_path}")
                                 break
             
-            # Look for beat mix file
-            beat_mix_path = os.path.join(SHARED_DIR, f"melody_results_{model_set}", f"job_{job_id}", "beat_mixed_synth_mix.wav")
-            if not os.path.exists(beat_mix_path):
-                beat_mix_path = None
-                
-                # Try alternative locations
-                alternative_beat_mix_paths = [
-                    os.path.join(SHARED_DIR, f"melody_results_{model_set}", "beat_mixed_synth_mix.wav"),
-                    os.path.join(SHARED_DIR, f"melody_results", f"job_{job_id}", "beat_mixed_synth_mix.wav")
-                ]
-                
-                for path in alternative_beat_mix_paths:
-                    if os.path.exists(path):
-                        beat_mix_path = path
-                        logger.info(f"Found beat mix file at alternative location: {beat_mix_path}")
-                        break
+            # Look for beat mix file with comprehensive path checking
+            beat_mix_path = None
+            possible_beat_mix_paths = [
+                # Primary location with job-specific directory
+                os.path.join(SHARED_DIR, f"melody_results_{model_set}", f"job_{job_id}", "beat_mixed_synth_mix.wav"),
+                # Alternative location without job directory
+                os.path.join(SHARED_DIR, f"melody_results_{model_set}", "beat_mixed_synth_mix.wav"),
+                # Legacy location without model suffix
+                os.path.join(SHARED_DIR, "melody_results", f"job_{job_id}", "beat_mixed_synth_mix.wav"),
+                # Check with model suffix format
+                os.path.join(SHARED_DIR, f"melody_results{model_suffix}", f"job_{job_id}", "beat_mixed_synth_mix.wav")
+            ]
+
+            for path in possible_beat_mix_paths:
+                if os.path.exists(path):
+                    beat_mix_path = path
+                    logger.info(f"Found beat mix file at: {beat_mix_path}")
+                    break
+
+            if not beat_mix_path:
+                logger.warning(f"Beat mix file not found in any of the expected locations for job {job_id}")
+                logger.info(f"Searched paths: {possible_beat_mix_paths}")
             
             # Prepare the variants for display
             variant1 = variant_mixes.get("variant_1", None)
@@ -1086,10 +1101,6 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
             
             if variant1 or variant2 or variant3:
                 success_message = f"✅ Generated melody variations with base seed {base_seed} and variation {variation_param}! (Job ID: {job_id})"
-                
-                # Update recent jobs display and current job status
-                recent_jobs_html = get_recent_jobs()
-                current_job_status = get_current_job_status()
                 
                 # Return the variants for display
                 return (
@@ -1109,6 +1120,7 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
     except Exception as e:
         logger.error(f"Error generating melodies with seed variation: {str(e)}", exc_info=True)
         return f"❌ Error: {str(e)}", None, None, None, None
+
 
 # Function to randomize the base seed value
 def randomize_base_seed_value():
@@ -1534,6 +1546,7 @@ with gr.Blocks(title="Melody Generator") as demo:
             variant1_preview,  # variant1_preview
             variant2_preview,  # variant2_preview
             variant3_preview,  # variant3_preview
+            batch_beat_mix_preview,  # ADD THIS LINE - was missing!
             recent_jobs_list,
             current_job_status
         ]
