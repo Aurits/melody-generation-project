@@ -928,6 +928,9 @@ def process_audio_with_seed_variation(file, start_time, bpm, base_seed, variatio
         
         # Always use batch size 3 for seed variation mode
         batch_size = 3
+
+        # Define model_suffix for path construction
+        model_suffix = f"_{model_set}"
         
         # Use the same base seed for all three tracks
         seeds = [base_seed, base_seed, base_seed]
